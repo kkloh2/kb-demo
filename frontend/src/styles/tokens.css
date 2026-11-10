@@ -1,0 +1,82 @@
+/*
+ * Design tokens — OCBC-themed common platform.
+ * Single source of truth for colour, type and spacing. Every app on the
+ * platform imports this file; never hard-code brand values in components.
+ */
+:root {
+  /* Brand */
+  --brand-red: #ed1c24; /* matches the OCBC logo */
+  --brand-red-600: #c8161d;
+  --brand-red-700: #9e000a;
+  --brand-red-050: #fff1f2;
+  --brand-ink: #1d1d1f;
+
+  /* Neutrals */
+  --gray-900: #1f2328;
+  --gray-700: #4b5563;
+  --gray-500: #6b7280;
+  --gray-300: #d1d5db;
+  --gray-200: #e5e7eb;
+  --gray-100: #f3f4f6;
+  --gray-050: #f9fafb;
+  --white: #ffffff;
+
+  /* Semantic */
+  --bg-page: var(--gray-050);
+  --bg-surface: var(--white);
+  --text-primary: #333333;
+  --text-secondary: #555555;
+  --text-muted: #757575;
+  --border: var(--gray-200);
+  --border-strong: var(--gray-300);
+  --focus-ring: 0 0 0 3px rgba(237, 28, 36, 0.25);
+  --danger: #b42318;
+  --danger-bg: #fef3f2;
+
+  /* Type */
+  --font-sans: "Open Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --fs-xs: 12px;
+  --fs-sm: 14px;
+  --fs-md: 16px;
+  --fs-lg: 20px;
+  --fs-xl: 28px;
+  --fs-2xl: 40px;
+
+  /* Shape & depth */
+  --radius: 6px; /* the only corner radius: buttons, inputs, cards, panels, menus, tiles */
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04),
+    0 12px 32px rgba(16, 24, 40, 0.08);
+
+  /* Spacing (4px grid) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  background: var(--bg-page);
+  -webkit-font-smoothing: antialiased;
+}

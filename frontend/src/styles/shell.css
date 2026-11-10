@@ -1,0 +1,367 @@
+/* App shell — fixed left navigation panel + main content area (web). */
+
+.shell {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  height: 100vh;
+  background: var(--bg-page);
+}
+
+/* ---------- Sidebar ---------- */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 248px;
+  min-height: 0;
+  transition: width 0.2s ease;
+  border-right: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 64px;
+  overflow: hidden;
+  padding: 0 var(--sp-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar__brand img {
+  width: 28px;
+  height: 28px;
+}
+
+.sidebar__product {
+  overflow: hidden;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.sidebar__collapse {
+  margin-left: auto;
+}
+
+.sidebar__nav {
+  flex: 1;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: var(--sp-3);
+}
+
+.nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  height: 40px;
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.nav-item:hover {
+  background: var(--gray-100);
+  color: var(--text-primary);
+}
+
+.nav-item:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.nav-item[aria-current="page"] {
+  background: var(--brand-red-050);
+  color: var(--brand-red-600);
+  font-weight: 700;
+}
+
+.nav-item svg {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+
+.icon-btn {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  background: var(--gray-100);
+  color: var(--text-primary);
+}
+
+.icon-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.icon-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* ---------- User footer ---------- */
+.sidebar__user {
+  min-width: 0;
+  padding: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+
+.sidebar__admin {
+  margin-bottom: var(--sp-1);
+}
+
+.user-menu {
+  position: relative;
+}
+
+.user-trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  height: 56px; /* fixed, so the divider above doesn't move on collapse */
+  padding: 0 var(--sp-1);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.user-trigger:hover {
+  background: var(--gray-100);
+}
+
+.user-trigger[aria-expanded="true"] {
+  background: var(--brand-red-050);
+}
+
+.user-trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--brand-red);
+  color: var(--white);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.user__info {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.user__name,
+.user__meta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.user__name {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.user__meta {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+/* Account popover — opens above the trigger (to the right when collapsed). */
+.popover {
+  position: absolute;
+  bottom: calc(100% + var(--sp-2));
+  left: 0;
+  right: 0;
+  z-index: 20;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.popover__header {
+  padding: var(--sp-4) var(--sp-4) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.popover__section {
+  padding: var(--sp-2) 0;
+}
+
+.popover__name,
+.popover__email {
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.popover__name {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.popover__email {
+  margin-top: var(--sp-1);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.popover__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  height: 40px;
+  padding: 0 var(--sp-4);
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.popover__item:hover {
+  background: var(--gray-100);
+}
+
+.popover__item:focus-visible {
+  outline: none;
+  background: var(--gray-100);
+  box-shadow: inset 0 0 0 2px rgba(237, 28, 36, 0.35);
+}
+
+.popover__item svg {
+  width: 18px;
+  height: 18px;
+  color: var(--text-secondary);
+}
+
+/* ---------- Collapsed ---------- */
+/* Icons never move: each is left-aligned on the same axis (centre 34px from
+   the left edge) in both states, and the collapsed width is twice that. */
+.sidebar--collapsed {
+  width: 68px;
+}
+
+.sidebar--collapsed .sidebar__brand {
+  padding: 0 14px;
+}
+
+/* Logo that turns into the expand icon on hover/focus. */
+.brand-toggle {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.brand-toggle > * {
+  grid-area: 1 / 1;
+}
+
+.brand-toggle svg {
+  width: 20px;
+  height: 20px;
+  opacity: 0;
+}
+
+.brand-toggle:hover,
+.brand-toggle:focus-visible {
+  background: var(--gray-100);
+}
+
+.brand-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.brand-toggle:hover img,
+.brand-toggle:focus-visible img {
+  opacity: 0;
+}
+
+.brand-toggle:hover svg,
+.brand-toggle:focus-visible svg {
+  opacity: 1;
+}
+
+/* Keep the label for screen readers; the title attribute gives a tooltip. */
+.sidebar--collapsed .nav-item__label,
+.sidebar--collapsed .user__info {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.sidebar--collapsed .popover {
+  bottom: 0;
+  left: calc(100% + var(--sp-3) + var(--sp-2));
+  right: auto;
+  width: 240px;
+}
+
+/* ---------- Main ---------- */
+.shell__main {
+  min-width: 0;
+  overflow: auto;
+}
