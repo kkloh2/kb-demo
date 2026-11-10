@@ -12,6 +12,8 @@ class UserOut(BaseModel):
     username: str = Field(description="LAN ID")
     display_name: str
     email: str
+    department: str
+    title: str
 
 
 class LoginResponse(BaseModel):

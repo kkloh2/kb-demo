@@ -1,0 +1,22 @@
+# Stand-in for the bank's Active Directory, read by app/auth/ldap.py on every sign-in.
+#
+# DEMO ONLY: passwords are plain text and compared exactly as written. In production the
+# password check is a bind against the real directory and no password is stored anywhere.
+#
+# Keys are LAN IDs (lower-case). Each user needs: password, display_name, email, department, title.
+# Edits take effect at the next sign-in; no restart needed.
+
+users:
+  admin:
+    password: admin123
+    display_name: Data Hub Admin
+    email: admin@datahub.local
+    department: Technology
+    title: Platform Administrator
+
+  analyst:
+    password: datahub123
+    display_name: Alex Tan
+    email: alex.tan@datahub.local
+    department: Risk Management
+    title: Data Analyst

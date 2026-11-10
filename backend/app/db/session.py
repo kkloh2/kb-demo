@@ -56,16 +56,15 @@ Db = Annotated[Session, Depends(get_db)]
 def _register_models() -> None:
     """Import every feature's models so Base.metadata knows their tables."""
     import app.auth.models  # noqa: F401
+    import app.users.models  # noqa: F401
 
 
 def _seed(db: Session) -> None:
-    from app.auth.seed import seed_users
-
-    seed_users(db)
+    """Demo data for each feature. Users need none: they come from the directory at first sign-in."""
 
 
 def init_db() -> None:
-    """Create tables if missing and seed demo data into an empty database."""
+    """Create tables if missing and add demo data."""
     _register_models()
     Base.metadata.create_all(get_engine())
     if get_settings().seed_demo_data:

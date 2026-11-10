@@ -2,7 +2,9 @@ import base64
 import json
 from datetime import timedelta
 
-from app.auth.models import AuthSession, User
+from app.auth import hooks
+from app.auth.errors import Unauthenticated
+from app.auth.models import AuthSession
 from app.db.base import utcnow
 from app.db.session import new_session
 
@@ -18,14 +20,21 @@ def test_login_returns_token_and_user(client):
     body = r.json()
     assert body["token_type"] == "bearer"
     assert body["expires_in"] == 3600
-    assert body["user"] == {"username": "analyst", "display_name": "Alex Tan", "email": "alex.tan@datahub.local"}
+    assert body["user"] == {
+        "username": "analyst",
+        "display_name": "Alex Tan",
+        "email": "alex.tan@datahub.local",
+        "department": "Risk Management",
+        "title": "Data Analyst",
+    }
 
 
-def test_token_identifies_the_user_only(client):
+def test_token_carries_the_directory_identity(client):
     token = client.post("/api/auth/login", json={"username": "analyst", "password": "datahub123"}).json()["access_token"]
     claims = _claims(token)
-    assert set(claims) == {"sub", "uid", "jti", "name", "iss", "aud", "iat", "exp"}
+    assert set(claims) == {"sub", "jti", "name", "email", "department", "title", "iss", "aud", "iat", "exp"}
     assert claims["sub"] == "analyst"
+    assert (claims["name"], claims["department"], claims["title"]) == ("Alex Tan", "Risk Management", "Data Analyst")
     assert claims["iss"] == "data-hub" and claims["aud"] == "data-hub-api"
     assert claims["exp"] - claims["iat"] == 3600
 
@@ -41,63 +50,88 @@ def test_wrong_password_and_unknown_user_get_the_same_answer(client):
     assert a.json() == b.json() == {"detail": "Incorrect LAN ID or password."}
 
 
-def test_unknown_user_still_runs_a_password_check(client, monkeypatch):
-    """Guards against LAN ID enumeration by timing."""
-    import app.auth.service as auth_service
-
-    calls = []
-    monkeypatch.setattr(auth_service, "burn_password_check", lambda pw: calls.append(pw))
-    client.post("/api/auth/login", json={"username": "nobody", "password": "x"})
-    assert calls == ["x"]
-
-
-def test_inactive_user_cannot_sign_in(client):
-    with new_session() as db:
-        db.query(User).filter_by(lan_id="analyst").one().is_active = False
-        db.commit()
-    r = client.post("/api/auth/login", json={"username": "analyst", "password": "datahub123"})
-    assert r.status_code == 401
-    assert r.json()["detail"] == "Incorrect LAN ID or password."
-
-
 def test_empty_fields_are_rejected(client):
     assert client.post("/api/auth/login", json={"username": "", "password": "x"}).status_code == 422
     assert client.post("/api/auth/login", json={"username": "analyst", "password": ""}).status_code == 422
 
 
-def test_lockout_after_five_failures(client):
-    for _ in range(4):
+def test_repeated_failures_do_not_lock_the_account(client, login):
+    """Lockout is the directory's job: Data Hub never blocks a correct password."""
+    login("analyst")
+    for _ in range(10):
         assert client.post("/api/auth/login", json={"username": "analyst", "password": "bad"}).status_code == 401
-    r = client.post("/api/auth/login", json={"username": "analyst", "password": "bad"})
-    assert r.status_code == 423
-    # Even the right password is refused while locked.
+    login("analyst")
+
+
+def test_directory_refusal_is_a_plain_sign_in_failure(client, monkeypatch):
+    """A locked or disabled directory account comes back as None, like a wrong password."""
+    import app.auth.service as auth_service
+
+    monkeypatch.setattr(auth_service.ldap, "authenticate", lambda *a: None)
     r = client.post("/api/auth/login", json={"username": "analyst", "password": "datahub123"})
-    assert r.status_code == 423
-    assert "Try again in 15 minutes" in r.json()["detail"]
+    assert r.status_code == 401
+    assert r.json()["detail"] == "Incorrect LAN ID or password."
 
 
-def test_lock_expires(client):
-    for _ in range(5):
-        client.post("/api/auth/login", json={"username": "analyst", "password": "bad"})
-    with new_session() as db:
-        db.query(User).filter_by(lan_id="analyst").one().locked_until = utcnow() - timedelta(seconds=1)
-        db.commit()
-    assert client.post("/api/auth/login", json={"username": "analyst", "password": "datahub123"}).status_code == 200
-
-
-def test_successful_login_resets_failed_count(client):
-    client.post("/api/auth/login", json={"username": "analyst", "password": "bad"})
-    client.post("/api/auth/login", json={"username": "analyst", "password": "datahub123"})
-    with new_session() as db:
-        user = db.query(User).filter_by(lan_id="analyst").one()
-        assert user.failed_login_count == 0
-        assert user.last_login_at is not None
+def test_directory_down_is_not_a_wrong_password(client, directory):
+    directory.unlink()
+    r = client.post("/api/auth/login", json={"username": "analyst", "password": "datahub123"})
+    assert r.status_code == 503
+    assert r.json()["detail"] == "Sign-in is unavailable right now. Please try again later."
 
 
 def test_me_returns_the_signed_in_user(client, login):
     r = client.get("/api/auth/me", headers=login("admin"))
     assert r.status_code == 200
-    assert r.json()["username"] == "admin"
+    assert r.json() == {
+        "username": "admin",
+        "display_name": "Data Hub Admin",
+        "email": "admin@datahub.local",
+        "department": "Technology",
+        "title": "Platform Administrator",
+    }
+
+
+def test_sign_in_hooks_get_the_identity(client, monkeypatch):
+    seen = []
+    monkeypatch.setattr(hooks, "_sign_in_hooks", [lambda db, who: seen.append(who)])
+    client.post("/api/auth/login", json={"username": "analyst", "password": "datahub123"})
+    assert [(w.lan_id, w.department) for w in seen] == [("analyst", "Risk Management")]
+
+
+def test_hooks_do_not_run_when_the_directory_refuses(client, monkeypatch):
+    seen = []
+    monkeypatch.setattr(hooks, "_sign_in_hooks", [lambda db, who: seen.append(who)])
+    client.post("/api/auth/login", json={"username": "analyst", "password": "bad"})
+    assert seen == []
+
+
+def test_a_hook_can_refuse_sign_in(client, monkeypatch):
+    def refuse(db, who):
+        raise Unauthenticated("Your Data Hub access has been removed.")
+
+    monkeypatch.setattr(hooks, "_sign_in_hooks", [refuse])
+    r = client.post("/api/auth/login", json={"username": "analyst", "password": "datahub123"})
+    assert r.status_code == 401
+    assert r.json()["detail"] == "Your Data Hub access has been removed."
+    with new_session() as db:
+        assert db.query(AuthSession).count() == 0
+
+
+def test_auth_imports_no_other_feature():
+    """Auth stays self-contained: only core and db, never users or later features."""
+    import ast
+    import pathlib
+
+    import app.auth
+
+    for path in pathlib.Path(app.auth.__file__).parent.glob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            names = [a.name for a in node.names] if isinstance(node, ast.Import) else (
+                [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
+            for name in names:
+                if name.startswith("app."):
+                    assert name.split(".")[1] in {"auth", "core", "db"}, f"{path.name} imports {name}"
 
 
 def test_logout_revokes_the_token(client, login):

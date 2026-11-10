@@ -28,10 +28,9 @@ class Settings(BaseSettings):
     jwt_audience: str = "data-hub-api"
     access_token_minutes: int = 60
 
-    # Passwords and lockout
-    password_hash_iterations: int = 600_000  # OWASP 2023 guidance for PBKDF2-HMAC-SHA256
-    max_failed_logins: int = 5
-    lockout_minutes: int = 15
+    # Sign-in directory: a YAML stand-in for LDAP / Active Directory for now.
+    # Password policy and account lockout are the directory's job, not Data Hub's.
+    ldap_directory_file: Path = BACKEND_DIR / "ldap-directory.yaml"
 
     cors_origins: list[str] = ["http://localhost:5173"]
 

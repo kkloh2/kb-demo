@@ -28,7 +28,9 @@ export function HomePage({ user, onSignOut }: Props) {
 
       <main className="home__body">
         <h1 className="home__title">Welcome, {user.display_name}</h1>
-        <p className="home__lede">You're signed in to Data Hub.</p>
+        {(user.title || user.department) && (
+          <p className="home__lede">{[user.title, user.department].filter(Boolean).join(", ")}</p>
+        )}
       </main>
     </div>
   );

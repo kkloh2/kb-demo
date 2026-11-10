@@ -5,5 +5,7 @@ class Unauthenticated(DomainError):
     status_code = 401
 
 
-class AccountLocked(DomainError):
-    status_code = 423
+class DirectoryUnavailable(DomainError):
+    """The directory (LDAP) could not be reached or answered with an error (not a wrong password)."""
+
+    status_code = 503

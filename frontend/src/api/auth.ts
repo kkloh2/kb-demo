@@ -7,6 +7,8 @@ export interface User {
   username: string; // LAN ID
   display_name: string;
   email: string;
+  department: string; // from the directory, e.g. "Risk Management"
+  title: string; // job title, e.g. "Data Analyst"
 }
 
 export interface LoginResponse {

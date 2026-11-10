@@ -1,13 +1,21 @@
 """Authentication: sign-in with LAN ID and password, JWT access tokens, sessions, sign-out.
 
+The password is checked by the directory (ldap.py); Data Hub stores no passwords.
+Auth is self-contained: it imports no other feature. People are identified by LAN ID; other
+modules (users, ...) take part in sign-in through hooks.py and require sign-in with CurrentUser.
+
     router.py        HTTP endpoints under /api/auth (login, logout, me)
     dependencies.py  CurrentUser: the FastAPI dependency other modules use to require sign-in
-    service.py       sign-in, lockout, token -> Principal, sign-out
-    security.py      password hashing and JWT encoding/decoding
-    models.py        users and auth_sessions tables
+    service.py       sign-in, token -> Principal, sign-out
+    identity.py      Identity (who the directory verified) and Principal (the signed-in caller)
+    hooks.py         on_sign_in: let other modules record or refuse a sign-in
+    ldap.py          the directory: LAN ID + password -> (department, display_name, email, title)
+                     (a YAML file, backend/ldap-directory.yaml, stands in for Active Directory)
+    security.py      JWT encoding/decoding
+    models.py        auth_sessions table
     schemas.py       request and response bodies
-    errors.py        Unauthenticated (401), AccountLocked (423)
-    seed.py          demo users
+    errors.py        Unauthenticated (401), DirectoryUnavailable (503)
 
-Settings (JWT, password hashing, lockout) live in app.core.config with the rest.
+Account lockout and password policy are left to the directory.
+Settings (JWT, directory file) live in app.core.config with the rest.
 """

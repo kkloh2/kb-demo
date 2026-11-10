@@ -6,7 +6,8 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.auth.errors import Unauthenticated
-from app.auth.service import Principal, principal_from_token
+from app.auth.identity import Principal
+from app.auth.service import principal_from_token
 from app.db.session import Db
 
 _bearer = HTTPBearer(auto_error=False, description="Access token from POST /api/auth/login")
