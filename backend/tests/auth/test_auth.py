@@ -35,7 +35,7 @@ def test_login_returns_token_and_user(client):
 def test_token_carries_the_directory_identity(client):
     token = client.post("/api/auth/login", json={"username": "analyst", "password": "datahub123"}).json()["access_token"]
     claims = _claims(token)
-    assert set(claims) == {"sub", "jti", "name", "email", "department", "title", "iss", "aud", "iat", "exp", "roles"}
+    assert set(claims) == {"sub", "jti", "name", "email", "department", "title", "iss", "aud", "iat", "exp", "system_roles", "org_unit_roles"}
     assert claims["sub"] == "analyst"
     assert (claims["name"], claims["department"], claims["title"]) == ("Alex Tan", "Risk Management", "Data Analyst")
     assert claims["iss"] == "data-hub" and claims["aud"] == "data-hub-api"

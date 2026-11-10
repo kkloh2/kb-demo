@@ -59,17 +59,29 @@ def _register_models() -> None:
     import app.users.models  # noqa: F401
 
 
+def _reference_data(db: Session) -> None:
+    """Data every database needs, kept in sync with the code at every start-up."""
+    from app.users.service import sync_roles
+
+    sync_roles(db)
+
+
 def _seed(db: Session) -> None:
-    """Demo data for each feature. Users need none: they come from the directory at first sign-in."""
+    """Demo data, added only to an empty database. Users need none: they come from the directory."""
+    from app.users.seed import seed_departments
+
+    seed_departments(db)
 
 
 def init_db() -> None:
-    """Create tables if missing and add demo data."""
+    """Create tables if missing, sync reference data, and add demo data."""
     _register_models()
     Base.metadata.create_all(get_engine())
-    if get_settings().seed_demo_data:
-        with new_session() as db:
+    with new_session() as db:
+        _reference_data(db)
+        if get_settings().seed_demo_data:
             _seed(db)
+        db.commit()
 
 
 def reset_database() -> None:
@@ -78,4 +90,6 @@ def reset_database() -> None:
     Base.metadata.drop_all(get_engine())
     Base.metadata.create_all(get_engine())
     with new_session() as db:
+        _reference_data(db)
         _seed(db)
+        db.commit()

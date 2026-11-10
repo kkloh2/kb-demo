@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # Password policy and account lockout are the directory's job, not Data Hub's.
     ldap_directory_file: Path = BACKEND_DIR / "ldap-directory.yaml"
 
+    # LAN IDs made system admins when they sign in (how the first system admin gets in).
+    bootstrap_system_admins: list[str] = ["admin"]
+
     cors_origins: list[str] = ["http://localhost:5173"]
 
     @model_validator(mode="after")

@@ -7,7 +7,7 @@ Token claims (besides the standard iss/aud/iat/exp):
     email       email           | from the directory at sign-in
     department  department      |
     title       job title      /
-    ...         any claims added by sign-in hooks (e.g. "roles" from app.users)
+    ...         any claims added by sign-in hooks (e.g. "system_roles", "org_unit_roles" from app.users)
 
 Auth knows nothing about Data Hub's own user records, roles or access: other modules take part
 in sign-in through app.auth.hooks and look people up by LAN ID (Principal.lan_id).
@@ -19,6 +19,7 @@ from datetime import timedelta
 from types import MappingProxyType
 
 import jwt
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.auth import hooks, ldap
@@ -123,7 +124,7 @@ def principal_from_token(db: Session, token: str) -> Principal:
     )
 
 
-# --------------------------------------------------------------------------- sign-out
+# --------------------------------------------------------------------------- sign-out & revocation
 
 
 def logout(db: Session, principal: Principal) -> None:
@@ -132,3 +133,14 @@ def logout(db: Session, principal: Principal) -> None:
         session.revoked_at = utcnow()
         session.revoked_reason = "logout"
     db.commit()
+
+
+def revoke_sessions(db: Session, lan_id: str, reason: str) -> int:
+    """End every active session of a person, e.g. after their roles change (their token's claims
+    are now stale). Adds to the caller's transaction; the caller commits. Returns the count."""
+    result = db.execute(
+        update(AuthSession)
+        .where(AuthSession.lan_id == lan_id.strip().lower(), AuthSession.revoked_at.is_(None))
+        .values(revoked_at=utcnow(), revoked_reason=reason)
+    )
+    return result.rowcount or 0

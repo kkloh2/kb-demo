@@ -3,7 +3,7 @@
 A sign-in hook runs after the directory has accepted the password and before the session is
 created, inside the same database transaction. It may:
   - record the sign-in (the users module creates or refreshes the user's record),
-  - add claims to the access token by returning them as a dict (the users module adds "roles"),
+  - add claims to the access token by returning them as a dict (the users module adds its role claims),
   - refuse the sign-in by raising a DomainError, e.g. Unauthenticated (nothing is saved then).
 
 Added claims come back on every request as Principal.claims. They are a snapshot taken at
