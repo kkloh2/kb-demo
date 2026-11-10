@@ -1,0 +1,85 @@
+/* Signed-in placeholder page: a top bar with the account and Sign out, and a welcome line. */
+
+.home {
+  min-height: 100vh;
+  background: var(--bg-page);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+  padding: 0 64px; /* the app's fixed side gutters */
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.topbar__brand .logo {
+  height: 28px;
+  margin: 0;
+}
+
+.topbar__product {
+  padding-left: var(--sp-4);
+  border-left: 1px solid var(--border-strong);
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
+
+.topbar__account {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  font-size: var(--fs-sm);
+}
+
+.topbar__lan {
+  color: var(--text-muted);
+}
+
+.btn-secondary {
+  height: 36px;
+  padding: 0 var(--sp-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--white);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.btn-secondary:hover {
+  border-color: var(--brand-red);
+  color: var(--brand-red);
+}
+
+.btn-secondary:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.home__body {
+  padding: var(--sp-10) 64px;
+}
+
+.home__title {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-xl);
+  font-weight: 700;
+}
+
+.home__lede {
+  margin: 0;
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+}

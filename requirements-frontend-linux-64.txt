@@ -1,0 +1,35 @@
+# Frontend toolchain for data-hub-demo (conda/mamba spec file, conda-forge channel).
+# Target: Linux x86-64 (linux-64), glibc >= 2.28 (e.g. RHEL 8+, Ubuntu 20.04+).
+#
+# Create the environment:
+#   mamba create -n frontend-env -c conda-forge --file requirements-frontend-linux-64.txt
+# Activate and install the app's JS dependencies (exact versions from package-lock.json):
+#   mamba activate frontend-env
+#   cd frontend && npm ci
+#
+# Every package is pinned as name=version=build for an exact, reproducible env.
+# Only nodejs is requested directly; the rest are its runtime dependencies.
+# For macOS (Apple Silicon) use requirements-frontend.txt instead.
+
+# Node 26.13.0 (Active LTS line). Bundles npm 11.20.0.
+nodejs=26.13.0=h7dc8d62_1
+
+# Dependencies of nodejs
+_openmp_mutex=4.5=20_gnu
+c-ares=1.34.9=hebe6cf0_0
+ca-certificates=2026.10.23=hbd8a1cb_0
+icu=78.3=py310h44b86e0_2
+libabseil=20260817.0=cxx17_hbb87c76_2
+libbrotlicommon=1.2.1=h39a168f_0
+libbrotlidec=1.2.1=ha411449_0
+libbrotlienc=1.2.1=h018ffa1_0
+libev=4.33=h280c20c_3
+libgcc=16.2.0=ha9f2e26_7
+libgomp=16.2.0=he0feb66_7
+libnghttp2=1.71.0=hc5e5977_0
+libsqlite=3.54.1=h13e7031_0
+libstdcxx=16.2.0=h934c35e_7
+libuv=1.52.1=h280c20c_1
+libzlib=1.3.2=h25fd6f3_3
+openssl=3.6.5=h781a0a9_0
+zstd=1.5.7=hb78ec9c_7
