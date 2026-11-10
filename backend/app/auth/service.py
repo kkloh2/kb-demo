@@ -7,6 +7,7 @@ Token claims (besides the standard iss/aud/iat/exp):
     email       email           | from the directory at sign-in
     department  department      |
     title       job title      /
+    ...         any claims added by sign-in hooks (e.g. "roles" from app.users)
 
 Auth knows nothing about Data Hub's own user records, roles or access: other modules take part
 in sign-in through app.auth.hooks and look people up by LAN ID (Principal.lan_id).
@@ -15,6 +16,7 @@ in sign-in through app.auth.hooks and look people up by LAN ID (Principal.lan_id
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
+from types import MappingProxyType
 
 import jwt
 from sqlalchemy.orm import Session
@@ -62,7 +64,7 @@ def authenticate(
         department=entry.department,
         title=entry.title,
     )
-    hooks.run_sign_in_hooks(db, identity)
+    extra_claims = hooks.run_sign_in_hooks(db, identity)
 
     now = utcnow()
     expires_at = now + timedelta(minutes=s.access_token_minutes)
@@ -77,6 +79,7 @@ def authenticate(
     db.add(session)
     token = encode_token(
         {
+            **extra_claims,
             "sub": lan_id,
             "jti": session.id,
             "name": identity.display_name,
@@ -116,6 +119,7 @@ def principal_from_token(db: Session, token: str) -> Principal:
         department=str(claims.get("department", "")),
         title=str(claims.get("title", "")),
         session_id=session.id,
+        claims=MappingProxyType({k: v for k, v in claims.items() if k not in hooks.RESERVED_CLAIMS}),
     )
 
 

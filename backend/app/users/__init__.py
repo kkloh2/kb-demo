@@ -1,9 +1,11 @@
-"""Users: Data Hub's own record of each person, keyed by LAN ID.
+"""Users: Data Hub's own record of each person, keyed by LAN ID, and their roles.
 
     models.py   users table
-    service.py  lookups, and record_sign_in: the auth sign-in hook that creates or refreshes
-                a user from the directory details
+    hooks.py    the auth sign-in hooks: record_sign_in (create or refresh the user) and
+                add_roles_claim (put {"roles": [...]} in the token)
+    service.py  user lookups; roles: lookup_roles (placeholder) and roles_of (read a caller's
+                roles from their token)
 
 Depends on auth (Identity, and later CurrentUser for its endpoints); auth never imports users.
-Planned here: deactivating users (refuse sign-in from record_sign_in).
+Planned here: deactivating users (refuse sign-in from hooks.record_sign_in).
 """

@@ -1,6 +1,9 @@
 """Who someone is, as far as auth knows: their LAN ID and the details the directory returned."""
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from types import MappingProxyType
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -19,3 +22,6 @@ class Principal(Identity):
     """The signed-in caller of a request, read from their access token."""
 
     session_id: str
+    # Claims added by sign-in hooks (e.g. "roles"), read-only. Auth doesn't interpret them;
+    # the module that added a claim reads it back (e.g. app.users.service.roles_of).
+    claims: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))

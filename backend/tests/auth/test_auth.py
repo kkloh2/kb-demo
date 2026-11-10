@@ -2,9 +2,12 @@ import base64
 import json
 from datetime import timedelta
 
+import pytest
+
 from app.auth import hooks
 from app.auth.errors import Unauthenticated
 from app.auth.models import AuthSession
+from app.auth.service import principal_from_token
 from app.db.base import utcnow
 from app.db.session import new_session
 
@@ -32,7 +35,7 @@ def test_login_returns_token_and_user(client):
 def test_token_carries_the_directory_identity(client):
     token = client.post("/api/auth/login", json={"username": "analyst", "password": "datahub123"}).json()["access_token"]
     claims = _claims(token)
-    assert set(claims) == {"sub", "jti", "name", "email", "department", "title", "iss", "aud", "iat", "exp"}
+    assert set(claims) == {"sub", "jti", "name", "email", "department", "title", "iss", "aud", "iat", "exp", "roles"}
     assert claims["sub"] == "analyst"
     assert (claims["name"], claims["department"], claims["title"]) == ("Alex Tan", "Risk Management", "Data Analyst")
     assert claims["iss"] == "data-hub" and claims["aud"] == "data-hub-api"
@@ -116,6 +119,30 @@ def test_a_hook_can_refuse_sign_in(client, monkeypatch):
     assert r.json()["detail"] == "Your Data Hub access has been removed."
     with new_session() as db:
         assert db.query(AuthSession).count() == 0
+
+
+def test_hooks_can_add_token_claims(client, monkeypatch):
+    monkeypatch.setattr(hooks, "_sign_in_hooks", [lambda db, who: {"team": "alpha"}, lambda db, who: None])
+    token = client.post("/api/auth/login", json={"username": "analyst", "password": "datahub123"}).json()["access_token"]
+    assert _claims(token)["team"] == "alpha"
+    with new_session() as db:
+        principal = principal_from_token(db, token)
+    assert principal.claims == {"team": "alpha"}
+    assert principal.lan_id == "analyst"
+
+
+def test_hooks_cannot_overwrite_auth_claims(client, monkeypatch):
+    monkeypatch.setattr(hooks, "_sign_in_hooks", [lambda db, who: {"sub": "admin"}])
+    with pytest.raises(RuntimeError, match="sub"):
+        client.post("/api/auth/login", json={"username": "analyst", "password": "datahub123"})
+    with new_session() as db:
+        assert db.query(AuthSession).count() == 0
+
+
+def test_two_hooks_cannot_add_the_same_claim(client, monkeypatch):
+    monkeypatch.setattr(hooks, "_sign_in_hooks", [lambda db, who: {"team": "a"}, lambda db, who: {"team": "b"}])
+    with pytest.raises(RuntimeError, match="team"):
+        client.post("/api/auth/login", json={"username": "analyst", "password": "datahub123"})
 
 
 def test_auth_imports_no_other_feature():

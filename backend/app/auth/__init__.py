@@ -8,7 +8,7 @@ modules (users, ...) take part in sign-in through hooks.py and require sign-in w
     dependencies.py  CurrentUser: the FastAPI dependency other modules use to require sign-in
     service.py       sign-in, token -> Principal, sign-out
     identity.py      Identity (who the directory verified) and Principal (the signed-in caller)
-    hooks.py         on_sign_in: let other modules record or refuse a sign-in
+    hooks.py         on_sign_in: let other modules record a sign-in, add token claims, or refuse it
     ldap.py          the directory: LAN ID + password -> (department, display_name, email, title)
                      (a YAML file, backend/ldap-directory.yaml, stands in for Active Directory)
     security.py      JWT encoding/decoding

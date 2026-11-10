@@ -1,7 +1,7 @@
 """Data Hub's own record of each person who has signed in.
 
 A row is created the first time someone signs in and refreshed from the directory every time
-after (see app.users.service.record_sign_in). No passwords are stored.
+after (see app.users.hooks.record_sign_in). No passwords are stored.
 """
 
 from datetime import datetime
