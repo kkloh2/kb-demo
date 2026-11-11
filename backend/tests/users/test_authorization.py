@@ -334,3 +334,33 @@ def test_list_users_uses_three_queries_however_many_users(client, people):
     finally:
         event.remove(get_engine(), "before_cursor_execute", listener)
     assert len(statements) == 3
+
+
+# --------------------------------------------------------------------------- reading departments
+
+
+def test_list_departments(client, people):
+    client.post("/api/departments", json={"code": "ops", "name": "Operations"}, headers=people["admin"])
+    r = client.get("/api/departments", headers=people["admin"])
+    assert r.status_code == 200
+    assert [(d["code"], d["name"]) for d in r.json()] == [
+        ("HR", "Human Resources"), ("OPS", "Operations"), ("RISK", "Risk Management"),
+    ]
+    assert all(isinstance(d["id"], int) for d in r.json())
+
+
+def test_get_one_department(client, people):
+    r = client.get("/api/departments/risk", headers=people["admin"])
+    assert (r.status_code, r.json()["code"], r.json()["name"]) == (200, "RISK", "Risk Management")
+    assert client.get("/api/departments/NOPE", headers=people["admin"]).status_code == 404
+
+
+@pytest.mark.parametrize("who", ["risk.admin", "analyst"])
+def test_reading_departments_is_system_admin_only(client, people, who):
+    assert client.get("/api/departments", headers=people[who]).status_code == 403
+    assert client.get("/api/departments/RISK", headers=people[who]).status_code == 403
+
+
+def test_reading_departments_needs_sign_in(client):
+    assert client.get("/api/departments").status_code == 401
+    assert client.get("/api/departments/RISK").status_code == 401

@@ -1,5 +1,7 @@
 """Department endpoints.
 
+    GET    /api/departments                         system admin   every department, sorted by code
+    GET    /api/departments/{code}                  system admin   one department
     POST   /api/departments                         system admin   create a department {code, name}
     PUT    /api/departments/{code}                  system admin   replace its code and name
     DELETE /api/departments/{code}                  system admin   delete it and every role held in it
@@ -24,6 +26,22 @@ router = APIRouter(prefix="/departments", tags=["departments"])
 
 def _department_out(d: Department) -> DepartmentOut:
     return DepartmentOut(id=d.id, code=d.code, name=d.name)
+
+
+@router.get("", response_model=list[DepartmentOut], responses=FORBIDDEN_403)
+@SystemRoles("SYSTEM_ADMIN")
+def list_departments(db: Db) -> list[DepartmentOut]:
+    """Every department, sorted by code."""
+    return [_department_out(d) for d in service.list_departments(db)]
+
+
+@router.get(
+    "/{code}", response_model=DepartmentOut, responses={**FORBIDDEN_403, 404: {"description": "No such department"}}
+)
+@SystemRoles("SYSTEM_ADMIN")
+def get_department(code: DepartmentCode, db: Db) -> DepartmentOut:
+    """One department."""
+    return _department_out(service.require_department(db, code))
 
 
 @router.post(

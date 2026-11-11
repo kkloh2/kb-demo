@@ -156,6 +156,16 @@ def _department_fields(code: str, name: str) -> tuple[str, str]:
     return code, name
 
 
+def list_departments(db: Session) -> list[Department]:
+    """Every department, sorted by code."""
+    return list(db.scalars(select(Department).order_by(Department.code)))
+
+
+def require_department(db: Session, code: str) -> Department:
+    """The department with this code, case-insensitive (NotFound otherwise)."""
+    return _require_department(db, code)
+
+
 def create_department(db: Session, actor_lan_id: str, code: str, name: str) -> Department:
     """Create a department. Code is stored upper-case, e.g. "RISK". Callers must be system admins."""
     actor = _require_user(db, actor_lan_id)

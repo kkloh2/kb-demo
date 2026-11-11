@@ -8,7 +8,8 @@
     seed.py     system admins from settings.bootstrap_system_admins (start-up, when there are none);
                 demo departments RISK and HR
     routers/    endpoints, one router per resource (departments.py, users.py):
-                  /api/departments                         POST; PUT, DELETE /{code}   system admin
+                  /api/departments                         GET, POST; GET, PUT, DELETE /{code}
+                                                                                       system admin
                   /api/users                               GET                         system admin
                   /api/users/{lan_id}                      GET, PUT, DELETE            system admin
                   /api/departments/{code}/users/{lan_id}   PUT, DELETE                 system admin OR that
