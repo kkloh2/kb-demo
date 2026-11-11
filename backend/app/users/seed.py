@@ -1,7 +1,7 @@
 """Seed data for the users module.
 
-    seed_system_admins   every start-up, every database: the LAN IDs in
-                         settings.bootstrap_system_admins exist and hold SYSTEM_ADMIN
+    seed_system_admins   every start-up, every database: when nobody holds SYSTEM_ADMIN, the
+                         LAN IDs in settings.bootstrap_system_admins get it
     seed_departments     demo only: RISK and HR, added to a database that has no departments
 """
 
@@ -9,20 +9,28 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.users.models import Department, RoleCode, User
+from app.users.models import Department, RoleCode, User, UserSystemRole
 from app.users.service import ensure_system_role, get_by_lan_id
 
 DEMO_DEPARTMENTS = [("RISK", "Risk Management"), ("HR", "Human Resources")]
 
 
 def seed_system_admins(db: Session) -> list[str]:
-    """Make sure the bootstrap system admins exist and hold SYSTEM_ADMIN. The caller commits.
+    """Give the bootstrap LAN IDs SYSTEM_ADMIN, but only when nobody holds it. The caller commits.
+
+    So a new database gets its first system admin, and a database that has lost every system admin
+    gets one back, but once there is a system admin, seeding leaves the role alone: a system admin
+    can remove SYSTEM_ADMIN from (or delete) a bootstrap user and it stays that way.
 
     A missing user is created with placeholder details (the LAN ID as name, an unroutable
     @pending.invalid email) and PUBLIC, like anyone new; the directory fills in their real details
-    at their first sign-in. SYSTEM_ADMIN is restored on every start-up, so a bootstrap admin can't
-    be locked out by removing it. Returns the LAN IDs that were created.
+    at their first sign-in. Returns the LAN IDs that were created.
     """
+    has_system_admin = db.scalar(
+        select(UserSystemRole.user_id).where(UserSystemRole.role_code == RoleCode.SYSTEM_ADMIN.value).limit(1)
+    )
+    if has_system_admin is not None:
+        return []
     created = []
     for lan_id in sorted({x.strip().lower() for x in get_settings().bootstrap_system_admins if x.strip()}):
         user = get_by_lan_id(db, lan_id)

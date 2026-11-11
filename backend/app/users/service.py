@@ -5,7 +5,7 @@ Who may do what (enforced by the endpoint decorators in authorization.py):
                        and all their roles (system roles, and any org unit role in any department)
     DEPARTMENT_ADMIN   sets MAKER, CHECKER and VIEWER in their own department(s)
     PUBLIC             given to everyone at first sign-in (hooks.record_sign_in)
-    SYSTEM_ADMIN       seeded at start-up for the LAN IDs in settings.bootstrap_system_admins
+    SYSTEM_ADMIN       seeded at start-up for settings.bootstrap_system_admins, when nobody holds it
 
 Rules: MAKER and CHECKER can't both be held in the same department; VIEWER is never implied;
 nobody can remove their own SYSTEM_ADMIN role or delete themselves.

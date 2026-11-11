@@ -5,7 +5,7 @@
                 and add_roles_claim (put system_roles and org_unit_roles in the token)
     service.py  lookups; create/update/delete departments; upsert/delete users; set a user's roles in a department;
                 the rules about roles; reading a caller's roles from their token
-    seed.py     system admins from settings.bootstrap_system_admins (every start-up);
+    seed.py     system admins from settings.bootstrap_system_admins (start-up, when there are none);
                 demo departments RISK and HR
     routers/    endpoints, one router per resource (departments.py, users.py):
                   /api/departments                         POST; PUT, DELETE /{code}   system admin
