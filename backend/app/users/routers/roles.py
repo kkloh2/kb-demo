@@ -1,6 +1,6 @@
 """Role endpoints (read-only: roles are defined in code and synced into the database at start-up).
 
-    GET    /api/roles            system admin   every role: system roles first, then org unit roles
+    GET    /api/roles            system admin   every role: system roles, then org unit roles (by privilege)
     GET    /api/roles/{code}     system admin   one role
 """
 
@@ -27,7 +27,7 @@ def _role_out(r: Role) -> RoleOut:
 @router.get("", response_model=list[RoleOut], responses=FORBIDDEN_403)
 @SystemRoles("SYSTEM_ADMIN")
 def list_roles(db: Db) -> list[RoleOut]:
-    """Every role with its scope: system roles first, then org unit roles, each sorted by code."""
+    """Every role with its scope: system roles, then org unit roles from department admin to viewer."""
     return [_role_out(r) for r in service.list_roles(db)]
 
 

@@ -1,13 +1,16 @@
 import { useState } from "react";
 import type { User } from "../api/auth";
+import { HomeIcon } from "../components/Icons";
 import { Sidebar, type NavItem } from "../components/Sidebar";
+import { isSystemAdmin } from "../lib/token";
+import { AdminPage } from "../pages/AdminPage";
 import { HomePage } from "../pages/HomePage";
 import "../styles/shell.css";
 
 const COLLAPSED_KEY = "dh.sidebarCollapsed";
 
-/** Navigation entries. Empty for now: each feature (e.g. knowledge bases) adds its page here. */
-const NAV_ITEMS: NavItem[] = [];
+/** Navigation entries. Each feature (e.g. knowledge bases) adds its page here. */
+const NAV_ITEMS: NavItem[] = [{ key: "home", label: "Home", icon: <HomeIcon /> }];
 
 function readCollapsed(): boolean {
   try {
@@ -18,14 +21,18 @@ function readCollapsed(): boolean {
 }
 
 interface Props {
+  token: string;
   user: User;
   onSignOut: () => void;
+  /** The session ended while in use (e.g. the user's roles changed): back to sign-in with this message. */
+  onSessionEnded: (message: string) => void;
 }
 
 /** The signed-in app: navigation panel on the left, the current page on the right. */
-export function AppShell({ user, onSignOut }: Props) {
-  const [active, setActive] = useState<string | null>(null);
+export function AppShell({ token, user, onSignOut, onSessionEnded }: Props) {
+  const [active, setActive] = useState("home");
   const [collapsed, setCollapsed] = useState(readCollapsed);
+  const systemAdmin = isSystemAdmin(token);
 
   function toggle() {
     setCollapsed((c) => {
@@ -48,9 +55,14 @@ export function AppShell({ user, onSignOut }: Props) {
         onToggle={toggle}
         onNavigate={setActive}
         onSignOut={onSignOut}
+        showAdmin={systemAdmin}
       />
       <main className="shell__main">
-        <HomePage user={user} />
+        {active === "admin" && systemAdmin ? (
+          <AdminPage token={token} user={user} onSessionEnded={onSessionEnded} />
+        ) : (
+          <HomePage user={user} />
+        )}
       </main>
     </div>
   );

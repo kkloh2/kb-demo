@@ -373,8 +373,8 @@ def test_list_roles(client, people):
     r = client.get("/api/roles", headers=people["admin"])
     assert r.status_code == 200
     assert [(x["code"], x["scope"]) for x in r.json()] == [
-        ("PUBLIC", "system"), ("SYSTEM_ADMIN", "system"),
-        ("CHECKER", "org_unit"), ("DEPARTMENT_ADMIN", "org_unit"), ("MAKER", "org_unit"), ("VIEWER", "org_unit"),
+        ("SYSTEM_ADMIN", "system"), ("PUBLIC", "system"),
+        ("DEPARTMENT_ADMIN", "org_unit"), ("MAKER", "org_unit"), ("CHECKER", "org_unit"), ("VIEWER", "org_unit"),
     ]
     assert all(x["name"] and x["description"] for x in r.json())
 

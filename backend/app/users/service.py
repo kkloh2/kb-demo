@@ -58,9 +58,10 @@ def sync_roles(db: Session) -> None:
 
 
 def list_roles(db: Session) -> list[Role]:
-    """Every role: system roles first, then org unit roles, each sorted by code."""
-    roles = db.scalars(select(Role)).all()
-    return sorted(roles, key=lambda r: (r.scope != RoleScope.SYSTEM.value, r.code))
+    """Every role, in the order ROLE_DEFINITIONS lists them: system roles, then org unit roles
+    from most to least privileged (department admin, maker, checker, viewer)."""
+    order = {code.value: i for i, code in enumerate(ROLE_DEFINITIONS)}
+    return sorted(db.scalars(select(Role)), key=lambda r: order.get(r.code, len(order)))
 
 
 def require_role(db: Session, code: str) -> Role:

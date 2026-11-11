@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
 import type { User } from "../api/auth";
-import { PanelIcon } from "./Icons";
+import { PanelIcon, SettingsIcon } from "./Icons";
 import { UserMenu } from "./UserMenu";
 
-/** A page reachable from the navigation panel. None yet: features add their own entries. */
+/** A page reachable from the navigation panel. Features add their own entries. */
 export interface NavItem {
   key: string;
   label: string;
@@ -18,9 +18,11 @@ interface Props {
   onToggle: () => void;
   onNavigate: (key: string) => void;
   onSignOut: () => void;
+  /** Show the Administration entry (system admins). Navigates with the key "admin". */
+  showAdmin?: boolean;
 }
 
-export function Sidebar({ user, items, active, collapsed, onToggle, onNavigate, onSignOut }: Props) {
+export function Sidebar({ user, items, active, collapsed, onToggle, onNavigate, onSignOut, showAdmin }: Props) {
   return (
     <aside className={`sidebar${collapsed ? " sidebar--collapsed" : ""}`}>
       <div className="sidebar__brand">
@@ -74,6 +76,18 @@ export function Sidebar({ user, items, active, collapsed, onToggle, onNavigate, 
       </nav>
 
       <div className="sidebar__user">
+        {showAdmin && (
+          <button
+            type="button"
+            className="nav-item sidebar__admin"
+            aria-current={active === "admin" ? "page" : undefined}
+            onClick={() => onNavigate("admin")}
+            title={collapsed ? "Administration" : undefined}
+          >
+            <SettingsIcon />
+            <span className="nav-item__label">Administration</span>
+          </button>
+        )}
         <UserMenu user={user} collapsed={collapsed} onSignOut={onSignOut} />
       </div>
     </aside>

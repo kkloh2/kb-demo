@@ -57,7 +57,21 @@ export default function App() {
     setSession(null);
   }
 
+  /** The server ended the session (e.g. the user's roles changed): back to sign-in, saying why. */
+  function handleSessionEnded(message: string) {
+    writeToken(null);
+    setNotice(message);
+    setSession(null);
+  }
+
   if (restoring) return null;
   if (!session) return <LoginPage notice={notice} onSuccess={handleLogin} />;
-  return <AppShell user={session.user} onSignOut={handleSignOut} />;
+  return (
+    <AppShell
+      token={session.token}
+      user={session.user}
+      onSignOut={handleSignOut}
+      onSessionEnded={handleSessionEnded}
+    />
+  );
 }
