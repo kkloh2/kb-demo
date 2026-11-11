@@ -9,8 +9,9 @@ modules (users, ...) take part in sign-in through hooks.py and require sign-in w
     service.py       sign-in, token -> Principal, sign-out
     identity.py      Identity (who the directory verified) and Principal (the signed-in caller)
     hooks.py         on_sign_in: let other modules record a sign-in, add token claims, or refuse it
-    ldap.py          the directory: LAN ID + password -> (department, display_name, email, title)
-                     (a YAML file, backend/ldap-directory.yaml, stands in for Active Directory)
+    ldap.py          the directory: LAN ID + password -> (department, display_name, email, title),
+                     from a real LDAP / Active Directory server (ldap3) or, for the demo and tests,
+                     a YAML stand-in (backend/ldap-directory.yaml); see settings.directory
     security.py      JWT encoding/decoding
     models.py        auth_sessions table
     schemas.py       request and response bodies
