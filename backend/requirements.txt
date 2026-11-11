@@ -6,31 +6,31 @@
 #
 # pyproject.toml keeps the loose ranges (direct dependencies only); this file is the exact set.
 # Regenerate after an upgrade with: .venv/bin/pip freeze
+# Last checked against PyPI: 2026-11-11 (all up to date).
 
 # --- Application (direct dependencies) ---------------------------------------
-fastapi==0.162.2
+fastapi==0.162.4
 uvicorn[standard]==0.54.0
 pydantic-settings==2.16.2
 PyJWT==2.15.1
 SQLAlchemy==2.1.8
-python-multipart==0.0.33
 PyYAML==6.0.3
 
 # --- Tests (direct dependencies) ---------------------------------------------
 pytest==9.2.0
-httpx==0.28.1
+httpx2==2.16.0          # used by FastAPI's TestClient (Starlette prefers it over httpx)
 
 # --- Pulled in by the packages above -----------------------------------------
 # fastapi
 starlette==1.10.0
 pydantic==2.14.3
 pydantic_core==2.50.4
-annotated-doc==0.0.5
+annotated-doc==0.0.6
 annotated-types==0.8.0
 typing-inspection==0.4.5
 typing_extensions==4.16.0
 opentelemetry-api==1.45.2
-# starlette, httpx
+# fastapi, starlette, httpx2
 anyio==4.16.0
 idna==3.20
 # uvicorn and its [standard] extras
@@ -42,9 +42,9 @@ watchfiles==1.3.0
 websockets==17.4
 # pydantic-settings
 python-dotenv==1.2.4
-# httpx
-httpcore==1.0.9
-certifi==2026.10.23
+# httpx2
+httpcore2==2.16.0
+truststore==0.10.5
 # pytest
 iniconfig==2.3.1
 packaging==26.3
