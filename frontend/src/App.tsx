@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { logout, me, type LoginResponse, type User } from "./api/auth";
-import { HomePage } from "./pages/HomePage";
+import { AppShell } from "./layouts/AppShell";
 import { LoginPage } from "./pages/LoginPage";
 
 const TOKEN_KEY = "datahub.token";
@@ -59,5 +59,5 @@ export default function App() {
 
   if (restoring) return null;
   if (!session) return <LoginPage notice={notice} onSuccess={handleLogin} />;
-  return <HomePage user={session.user} onSignOut={handleSignOut} />;
+  return <AppShell user={session.user} onSignOut={handleSignOut} />;
 }
