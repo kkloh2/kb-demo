@@ -61,9 +61,12 @@ def _register_models() -> None:
 
 def _reference_data(db: Session) -> None:
     """Data every database needs, kept in sync with the code at every start-up."""
+    from app.users.seed import seed_system_admins
     from app.users.service import sync_roles
 
     sync_roles(db)
+    db.flush()
+    seed_system_admins(db)
 
 
 def _seed(db: Session) -> None:

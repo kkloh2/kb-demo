@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     ldap_attribute_department: str = "department"
     ldap_attribute_title: str = "title"
 
-    # LAN IDs made system admins when they sign in (how the first system admin gets in).
+    # LAN IDs seeded as system admins at every start-up (how the first system admin gets in).
     bootstrap_system_admins: list[str] = ["admin"]
 
     cors_origins: list[str] = ["http://localhost:5173"]

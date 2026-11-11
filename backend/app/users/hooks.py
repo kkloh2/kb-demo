@@ -1,7 +1,7 @@
 """The users module's auth sign-in hooks. Registered in app.main, in this order:
 
     record_sign_in   create or refresh the user from the directory details; a new user gets
-                     PUBLIC, and LAN IDs in settings.bootstrap_system_admins get SYSTEM_ADMIN
+                     PUBLIC (bootstrap system admins are seeded at start-up, see seed.py)
     add_roles_claim  put the person's roles in the access token:
                      {"system_roles": [...], "org_unit_roles": {"RISK": [...], ...}}
 
@@ -15,7 +15,6 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.auth.identity import Identity
-from app.core.config import get_settings
 from app.db.base import utcnow
 from app.users import service
 from app.users.models import RoleCode, User
@@ -37,8 +36,6 @@ def record_sign_in(db: Session, identity: Identity) -> None:
 
     if is_new:
         service.ensure_system_role(db, user, RoleCode.PUBLIC)
-    if identity.lan_id in {x.strip().lower() for x in get_settings().bootstrap_system_admins}:
-        service.ensure_system_role(db, user, RoleCode.SYSTEM_ADMIN)
 
 
 def add_roles_claim(db: Session, identity: Identity) -> dict[str, Any]:
