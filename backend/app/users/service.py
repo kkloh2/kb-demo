@@ -1,8 +1,8 @@
 """Users, departments and roles.
 
 Who may do what (enforced by the endpoint decorators in authorization.py):
-    SYSTEM_ADMIN       creates, updates and deletes departments; creates, updates and deletes users,
-                       their system roles and which departments they administer (DEPARTMENT_ADMIN)
+    SYSTEM_ADMIN       creates, updates and deletes departments; creates, updates and deletes users
+                       and all their roles (system roles, and any org unit role in any department)
     DEPARTMENT_ADMIN   sets MAKER, CHECKER and VIEWER in their own department(s)
     PUBLIC             given to everyone at first sign-in (hooks.record_sign_in)
     SYSTEM_ADMIN       given at sign-in to the LAN IDs in settings.bootstrap_system_admins
@@ -72,9 +72,6 @@ def system_roles(db: Session, user: User) -> set[RoleCode]:
     return {RoleCode(r) for r in db.scalars(select(UserSystemRole.role_code).where(UserSystemRole.user_id == user.id))}
 
 
-_held_system_roles = system_roles  # for functions whose `system_roles` parameter hides the lookup
-
-
 def org_unit_roles(db: Session, user: User) -> dict[str, set[RoleCode]]:
     """Department code -> roles held there."""
     rows = db.execute(
@@ -86,6 +83,11 @@ def org_unit_roles(db: Session, user: User) -> dict[str, set[RoleCode]]:
     for code, role in rows:
         held.setdefault(code, set()).add(RoleCode(role))
     return held
+
+
+# For functions whose `system_roles` / `org_unit_roles` parameters hide the lookups above.
+_held_system_roles = system_roles
+_held_org_unit_roles = org_unit_roles
 
 
 # --------------------------------------------------------------------------- token claims
@@ -227,25 +229,22 @@ def upsert_user(
     department: str = "",
     title: str = "",
     system_roles: list[str],
-    department_admin_of: list[str],
+    org_unit_roles: Mapping[str, list[str]],
 ) -> UserResult:
-    """Create or update a user, and set their system roles and the departments they administer.
+    """Create or update a user, and set all their roles.
 
-    `system_roles` and `department_admin_of` are complete lists: roles not in them are removed.
-    A new user always gets PUBLIC, listed or not (as people who first sign in do); on later
-    updates PUBLIC is like any other role and can be removed. MAKER, CHECKER and VIEWER are left
-    alone (department admins set those). The profile fields are refreshed from the directory
-    whenever the user signs in. Validated before anything changes.
+    `system_roles` (e.g. ["PUBLIC"]) and `org_unit_roles` (e.g. {"RISK": ["CHECKER", "VIEWER"]})
+    are complete, in the token's shape: roles not in them are removed, and a department left out
+    loses all the user's roles there. A new user always gets PUBLIC, listed or not (as people who
+    first sign in do); on later updates PUBLIC is like any other role. The profile fields are
+    refreshed from the directory whenever the user signs in. Validated before anything changes.
     """
     actor = _require_user(db, actor_lan_id)
     lan_id, email = lan_id.strip().lower(), email.strip().lower()
     if not lan_id or not display_name.strip() or not email:
         raise InvalidRequest("Enter a LAN ID, display name and email.")
     wanted_system = _parse_roles(system_roles, RoleScope.SYSTEM)
-    admin_of = {c: get_department(db, c) for c in sorted({c.strip().upper() for c in department_admin_of if c.strip()})}
-    missing = [c for c, d in admin_of.items() if d is None]
-    if missing:
-        raise NotFound(f"No department {', '.join(missing)}.")
+    wanted_org = _parse_org_unit_roles(db, org_unit_roles)  # department -> roles, validated
     if lan_id == actor.lan_id and RoleCode.SYSTEM_ADMIN not in wanted_system:
         raise Conflict("You can't remove your own SYSTEM_ADMIN role.")
 
@@ -270,11 +269,14 @@ def upsert_user(
     if wanted_system != current_system and not created:
         revoke_sessions(db, user.lan_id, reason="roles_changed")
 
-    current_admin_of = {c for c, roles in org_unit_roles(db, user).items() if RoleCode.DEPARTMENT_ADMIN in roles}
-    for code in sorted(current_admin_of - set(admin_of)):
-        _revoke(db, user, _require_department(db, code), RoleCode.DEPARTMENT_ADMIN)
-    for code in sorted(set(admin_of) - current_admin_of):
-        _grant(db, actor, user, admin_of[code], RoleCode.DEPARTMENT_ADMIN)
+    departments = {d.code: d for d in wanted_org}
+    wanted_pairs = {(d.code, r) for d, roles in wanted_org.items() for r in roles}
+    current_pairs = {(code, r) for code, roles in _held_org_unit_roles(db, user).items() for r in roles}
+    for code, role in sorted(current_pairs - wanted_pairs):
+        _revoke(db, user, departments.get(code) or _require_department(db, code), role)
+    db.flush()  # so swaps such as MAKER -> CHECKER don't trip the exclusivity check
+    for code, role in sorted(wanted_pairs - current_pairs):
+        _grant(db, actor, user, departments[code], role)
     db.commit()
     return UserResult(user, created)
 
@@ -364,6 +366,23 @@ def _parse_roles(names: list[str], scope: RoleScope) -> set[RoleCode]:
         _require_scope(role, scope)
         roles.add(role)
     return roles
+
+
+def _parse_org_unit_roles(db: Session, requested: Mapping[str, list[str]]) -> dict[Department, set[RoleCode]]:
+    """{"RISK": ["CHECKER"]} from a request -> {Department: {RoleCode}}, validated:
+    every department exists (NotFound), every role is an org unit role (InvalidRequest), and
+    MAKER and CHECKER aren't asked for together in one department (Conflict)."""
+    by_code: dict[str, set[RoleCode]] = {}
+    for code, roles in requested.items():
+        by_code.setdefault(code.strip().upper(), set()).update(_parse_roles(roles, RoleScope.ORG_UNIT))
+    departments = {code: get_department(db, code) for code in by_code}
+    missing = sorted(code for code, d in departments.items() if d is None)
+    if missing:
+        raise NotFound(f"No department {', '.join(missing)}.")
+    for code, roles in by_code.items():
+        if {RoleCode.MAKER, RoleCode.CHECKER} <= roles:
+            raise Conflict(f"One person can't be both maker and checker in a department ({code}).")
+    return {departments[code]: roles for code, roles in by_code.items() if roles}
 
 
 def _require_scope(role: RoleCode, scope: RoleScope) -> None:

@@ -41,7 +41,7 @@ def people(client, directory, login):
         for lan_id, code in (("risk.admin", "RISK"), ("hr.admin", "HR")):
             user = service.get_by_lan_id(db, lan_id)
             service.upsert_user(db, "admin", lan_id, display_name=user.display_name, email=user.email,
-                                system_roles=["PUBLIC"], department_admin_of=[code])
+                                system_roles=["PUBLIC"], org_unit_roles={code: ["DEPARTMENT_ADMIN"]})
     return {
         "admin": admin,
         "analyst": login("analyst"),  # PUBLIC only
@@ -181,7 +181,7 @@ def test_departments_are_system_admin_only(client, people, who, allowed):
 @pytest.mark.parametrize("who, allowed", [("admin", True), ("risk.admin", False), ("analyst", False)])
 def test_users_are_system_admin_only(client, people, who, allowed):
     body = {"display_name": "New Joiner", "email": "new.joiner@datahub.local",
-            "system_roles": ["PUBLIC"], "department_admin_of": []}
+            "system_roles": ["PUBLIC"], "org_unit_roles": {}}
     put = _status(client, people, who, "PUT", "/api/users/new.joiner", body)
     delete = _status(client, people, who, "DELETE", "/api/users/analyst")
     assert (put, delete) == ((201, 204) if allowed else (403, 403))
@@ -199,7 +199,7 @@ def test_all_endpoints_need_sign_in(client):
         ("POST", "/api/departments", {"code": "OPS", "name": "Ops"}),
         ("PUT", "/api/departments/RISK", {"code": "RISK", "name": "Risk"}),
         ("DELETE", "/api/departments/RISK", None),
-        ("PUT", "/api/users/x", {"display_name": "X", "email": "x@x", "system_roles": [], "department_admin_of": []}),
+        ("PUT", "/api/users/x", {"display_name": "X", "email": "x@x", "system_roles": [], "org_unit_roles": {}}),
         ("DELETE", "/api/users/x", None),
         ("PUT", "/api/departments/RISK/users/x", {"roles": []}),
         ("DELETE", "/api/departments/RISK/users/x", None),
@@ -235,27 +235,31 @@ def test_old_department_routes_are_gone(client, people):
 
 def test_put_user_creates_then_updates(client, people):
     body = {"display_name": "New Joiner", "email": "new.joiner@datahub.local", "title": "Analyst",
-            "system_roles": ["PUBLIC"], "department_admin_of": ["hr"]}
+            "system_roles": [], "org_unit_roles": {"hr": ["DEPARTMENT_ADMIN"], "RISK": ["maker", "VIEWER"]}}
     r = client.put("/api/users/New.Joiner", json=body, headers=people["admin"])
     assert r.status_code == 201
     assert r.json() == {
         "lan_id": "new.joiner", "display_name": "New Joiner", "email": "new.joiner@datahub.local",
         "department": "", "title": "Analyst", "system_roles": ["PUBLIC"],
-        "org_unit_roles": {"HR": ["DEPARTMENT_ADMIN"]},
+        "org_unit_roles": {"HR": ["DEPARTMENT_ADMIN"], "RISK": ["MAKER", "VIEWER"]},
     }
-    r = client.put("/api/users/new.joiner", json={**body, "department_admin_of": []}, headers=people["admin"])
-    assert (r.status_code, r.json()["org_unit_roles"]) == (200, {})
+    r = client.put("/api/users/new.joiner", json={**body, "org_unit_roles": {"RISK": ["CHECKER"]}},
+                   headers=people["admin"])
+    assert (r.status_code, r.json()["org_unit_roles"]) == (200, {"RISK": ["CHECKER"]})
 
 
 def test_put_user_validation(client, people):
-    body = {"display_name": "X", "email": "x@datahub.local", "system_roles": ["PUBLIC"], "department_admin_of": []}
+    body = {"display_name": "X", "email": "x@datahub.local", "system_roles": ["PUBLIC"], "org_unit_roles": {}}
     put = lambda b: client.put("/api/users/x", json=b, headers=people["admin"]).status_code  # noqa: E731
-    assert put({k: v for k, v in body.items() if k != "system_roles"}) == 422  # role lists are required
+    assert put({k: v for k, v in body.items() if k != "system_roles"}) == 422  # role fields are required
+    assert put({k: v for k, v in body.items() if k != "org_unit_roles"}) == 422
     assert put({**body, "system_roles": ["MAKER"]}) == 422
-    assert put({**body, "department_admin_of": ["NOPE"]}) == 404
+    assert put({**body, "org_unit_roles": {"RISK": ["SYSTEM_ADMIN"]}}) == 422
+    assert put({**body, "org_unit_roles": {"NOPE": ["VIEWER"]}}) == 404
+    assert put({**body, "org_unit_roles": {"RISK": ["MAKER", "CHECKER"]}}) == 409
     assert put({**body, "email": "rita.lim@datahub.local"}) == 409
     own = {"display_name": "Data Hub Admin", "email": "admin@datahub.local", "system_roles": ["PUBLIC"],
-           "department_admin_of": []}
+           "org_unit_roles": {}}
     assert client.put("/api/users/admin", json=own, headers=people["admin"]).status_code == 409
 
 

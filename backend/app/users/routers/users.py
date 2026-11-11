@@ -1,10 +1,10 @@
 """User endpoints.
 
-    PUT    /api/users/{lan_id}   system admin   create/update a user, their system roles and the
-                                                departments they administer
+    PUT    /api/users/{lan_id}   system admin   create/update a user and all their roles
+                                                (system roles, and org unit roles in any department)
     DELETE /api/users/{lan_id}   system admin   delete a user and all their roles
 
-A user's MAKER, CHECKER and VIEWER roles are set per department, in departments.py.
+Department admins set MAKER, CHECKER and VIEWER in their own department, in departments.py.
 """
 
 from fastapi import APIRouter, Response, status
@@ -25,18 +25,18 @@ router = APIRouter(prefix="/users", tags=["users"])
     responses={
         201: {"model": UserOut, "description": "User created"},
         **FORBIDDEN_403,
-        404: {"description": "A department in department_admin_of doesn't exist"},
-        409: {"description": "Email used by another user, or removing your own SYSTEM_ADMIN"},
+        404: {"description": "A department in org_unit_roles doesn't exist"},
+        409: {"description": "Email used by another user, MAKER and CHECKER together, or removing your own SYSTEM_ADMIN"},
     },
 )
 @SystemRoles("SYSTEM_ADMIN")
 def upsert_user(lan_id: LanId, body: UserUpsert, db: Db, p: CurrentUser, response: Response) -> UserOut:
-    """Create the user (201) or update them (200): profile, system roles and the departments they
-    administer. Both role lists are complete. A new user always gets PUBLIC."""
+    """Create the user (201) or update them (200): profile, system roles and org unit roles in any
+    department. Both are complete, in the token's shape. A new user always gets PUBLIC."""
     result = service.upsert_user(
         db, p.lan_id, lan_id,
         display_name=body.display_name, email=body.email, department=body.department, title=body.title,
-        system_roles=body.system_roles, department_admin_of=body.department_admin_of,
+        system_roles=body.system_roles, org_unit_roles=body.org_unit_roles,
     )
     if result.created:
         response.status_code = status.HTTP_201_CREATED

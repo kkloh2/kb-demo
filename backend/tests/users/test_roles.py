@@ -62,13 +62,18 @@ def _update_department(code, new_code, name):
         return service.update_department(db, code, new_code, name)
 
 
-def _upsert_user(lan_id, *, system_roles=("PUBLIC",), admin_of=(), actor="admin", **profile):
+def _upsert_user(lan_id, *, system_roles=("PUBLIC",), org=None, admin_of=(), actor="admin", **profile):
+    """org: the full org_unit_roles map. admin_of: shorthand for {code: ["DEPARTMENT_ADMIN"]}.
+    Without either, the user's current org unit roles are kept."""
     with new_session() as db:
         existing = service.get_by_lan_id(db, lan_id)
         profile.setdefault("display_name", existing.display_name if existing else lan_id.title())
         profile.setdefault("email", existing.email if existing else f"{lan_id}@datahub.local")
-        return service.upsert_user(db, actor, lan_id, system_roles=list(system_roles),
-                                   department_admin_of=list(admin_of), **profile)
+        if org is None:
+            current = {c: [r.value for r in roles] for c, roles in service.org_unit_roles(db, existing).items()} if existing else {}
+            org = {**{c: rs for c, rs in current.items() if c not in admin_of},
+                   **{c: sorted(set(current.get(c, [])) | {"DEPARTMENT_ADMIN"}) for c in admin_of}} if admin_of else current
+        return service.upsert_user(db, actor, lan_id, system_roles=list(system_roles), org_unit_roles=org, **profile)
 
 
 def _set(lan_id, code, roles, actor="risk.admin"):
@@ -227,20 +232,51 @@ def test_public_can_be_removed_on_update(people):
 
 
 def test_upsert_user_sets_exactly_the_roles_given(people):
-    _upsert_user("analyst", system_roles=["PUBLIC", "SYSTEM_ADMIN"], admin_of=["RISK", "HR"])
-    assert _roles("analyst") == ({R.PUBLIC, R.SYSTEM_ADMIN}, {"RISK": {R.DEPARTMENT_ADMIN}, "HR": {R.DEPARTMENT_ADMIN}})
-    result = _upsert_user("analyst", system_roles=[], admin_of=["hr"])
+    _upsert_user("analyst", system_roles=["PUBLIC", "SYSTEM_ADMIN"],
+                 org={"RISK": ["DEPARTMENT_ADMIN"], "hr": ["checker", "VIEWER"]})
+    assert _roles("analyst") == (
+        {R.PUBLIC, R.SYSTEM_ADMIN},
+        {"RISK": {R.DEPARTMENT_ADMIN}, "HR": {R.CHECKER, R.VIEWER}},
+    )
+    result = _upsert_user("analyst", system_roles=[], org={"HR": ["VIEWER"]})
     assert not result.created
-    assert _roles("analyst") == (set(), {"HR": {R.DEPARTMENT_ADMIN}})
+    assert _roles("analyst") == (set(), {"HR": {R.VIEWER}})  # RISK left out: its roles are gone
+    _upsert_user("analyst", org={})
+    assert _roles("analyst")[1] == {}
 
 
-def test_upsert_user_leaves_maker_checker_viewer_alone(people):
+def test_system_admin_can_give_any_org_unit_role(people):
+    _upsert_user("analyst", org={"RISK": ["MAKER", "VIEWER"], "HR": ["DEPARTMENT_ADMIN", "CHECKER"]})
+    assert _roles("analyst")[1] == {"RISK": {R.MAKER, R.VIEWER}, "HR": {R.DEPARTMENT_ADMIN, R.CHECKER}}
+
+
+def test_upsert_user_replaces_what_department_admins_set(people):
     _make_department_admins()
     _set("analyst", "RISK", ["CHECKER", "VIEWER"])
-    _upsert_user("analyst", admin_of=["HR"])
-    assert _roles("analyst")[1] == {"RISK": {R.CHECKER, R.VIEWER}, "HR": {R.DEPARTMENT_ADMIN}}
-    _upsert_user("analyst", admin_of=[])
-    assert _roles("analyst")[1] == {"RISK": {R.CHECKER, R.VIEWER}}
+    _upsert_user("analyst", org={"RISK": ["MAKER"]})  # MAKER <- CHECKER swap in one call
+    assert _roles("analyst")[1] == {"RISK": {R.MAKER}}
+
+
+@pytest.mark.parametrize("org, error", [
+    ({"RISK": ["SYSTEM_ADMIN"]}, InvalidRequest),
+    ({"RISK": ["OWNER"]}, InvalidRequest),
+    ({"NOPE": ["VIEWER"]}, NotFound),
+    ({"RISK": ["MAKER", "CHECKER"]}, Conflict),
+])
+def test_upsert_user_validates_org_unit_roles_and_changes_nothing(people, org, error):
+    _upsert_user("analyst", org={"HR": ["VIEWER"]})
+    with pytest.raises(error):
+        _upsert_user("analyst", system_roles=["PUBLIC", "SYSTEM_ADMIN"], org=org)
+    assert _roles("analyst") == ({R.PUBLIC}, {"HR": {R.VIEWER}})
+
+
+def test_upsert_user_with_unchanged_org_unit_roles_keeps_sessions(client, people):
+    _upsert_user("analyst", org={"RISK": ["VIEWER"]})
+    current = {"Authorization": f"Bearer {_token(client, 'analyst', 'datahub123')}"}
+    _upsert_user("analyst", org={"risk": ["viewer"]})
+    assert client.get("/api/auth/me", headers=current).status_code == 200
+    _upsert_user("analyst", org={"RISK": ["VIEWER"], "HR": ["VIEWER"]})
+    assert client.get("/api/auth/me", headers=current).status_code == 401
 
 
 @pytest.mark.parametrize("roles", [["CHECKER"], ["SUPER"]])
@@ -251,7 +287,8 @@ def test_upsert_user_refuses_wrong_system_roles(people, roles):
 
 def test_upsert_user_refuses_unknown_departments_and_changes_nothing(people):
     with pytest.raises(NotFound, match="NOPE"):
-        _upsert_user("analyst", system_roles=["PUBLIC", "SYSTEM_ADMIN"], admin_of=["RISK", "NOPE"])
+        _upsert_user("analyst", system_roles=["PUBLIC", "SYSTEM_ADMIN"],
+                     org={"RISK": ["DEPARTMENT_ADMIN"], "NOPE": ["VIEWER"]})
     assert _roles("analyst") == ({R.PUBLIC}, {})
 
 

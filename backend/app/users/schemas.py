@@ -21,15 +21,16 @@ class DepartmentOut(BaseModel):
 
 
 class UserUpsert(BaseModel):
-    """System admins: the user's profile, system roles and the departments they administer."""
+    """System admins: the user's profile and all their roles, in the token's shape."""
 
     display_name: str = Field(min_length=1, max_length=128)
     email: str = Field(min_length=3, max_length=256)
     department: str = Field(default="", max_length=128, description="Directory department text, not an org unit")
     title: str = Field(default="", max_length=128)
     system_roles: list[str] = Field(description='Complete list, e.g. ["PUBLIC"]. Others are removed.')
-    department_admin_of: list[str] = Field(
-        description='Department codes where the user is DEPARTMENT_ADMIN, e.g. ["RISK"]. Complete list.'
+    org_unit_roles: dict[str, list[str]] = Field(
+        description='Department code -> roles, e.g. {"RISK": ["DEPARTMENT_ADMIN"], "HR": ["CHECKER", "VIEWER"]}. '
+        "Complete: a department left out loses all the user's roles there. {} for none."
     )
 
 
