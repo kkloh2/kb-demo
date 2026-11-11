@@ -364,3 +364,41 @@ def test_reading_departments_is_system_admin_only(client, people, who):
 def test_reading_departments_needs_sign_in(client):
     assert client.get("/api/departments").status_code == 401
     assert client.get("/api/departments/RISK").status_code == 401
+
+
+# --------------------------------------------------------------------------- reading roles
+
+
+def test_list_roles(client, people):
+    r = client.get("/api/roles", headers=people["admin"])
+    assert r.status_code == 200
+    assert [(x["code"], x["scope"]) for x in r.json()] == [
+        ("PUBLIC", "system"), ("SYSTEM_ADMIN", "system"),
+        ("CHECKER", "org_unit"), ("DEPARTMENT_ADMIN", "org_unit"), ("MAKER", "org_unit"), ("VIEWER", "org_unit"),
+    ]
+    assert all(x["name"] and x["description"] for x in r.json())
+
+
+def test_get_one_role(client, people):
+    r = client.get("/api/roles/checker", headers=people["admin"])
+    assert r.status_code == 200
+    assert r.json() == {"code": "CHECKER", "scope": "org_unit", "name": "Checker",
+                        "description": "Approves or rejects what makers submit."}
+    assert client.get("/api/roles/OWNER", headers=people["admin"]).status_code == 404
+
+
+@pytest.mark.parametrize("who", ["risk.admin", "analyst"])
+def test_reading_roles_is_system_admin_only(client, people, who):
+    assert client.get("/api/roles", headers=people[who]).status_code == 403
+    assert client.get("/api/roles/CHECKER", headers=people[who]).status_code == 403
+
+
+def test_roles_are_read_only(client, people):
+    for method in ("POST", "PUT", "DELETE"):
+        assert client.request(method, "/api/roles/CHECKER", headers=people["admin"]).status_code == 405
+    assert client.post("/api/roles", json={}, headers=people["admin"]).status_code == 405
+
+
+def test_reading_roles_needs_sign_in(client):
+    assert client.get("/api/roles").status_code == 401
+    assert client.get("/api/roles/CHECKER").status_code == 401

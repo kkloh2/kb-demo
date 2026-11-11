@@ -38,7 +38,9 @@ class RoleCode(StrEnum):
 
 # code -> (scope, display name, description). Synced into the roles table at start-up.
 ROLE_DEFINITIONS: dict[RoleCode, tuple[RoleScope, str, str]] = {
-    RoleCode.SYSTEM_ADMIN: (RoleScope.SYSTEM, "System admin", "Creates departments and their department admins."),
+    RoleCode.SYSTEM_ADMIN: (
+        RoleScope.SYSTEM, "System admin", "Manages departments, users and every role in any department.",
+    ),
     RoleCode.PUBLIC: (RoleScope.SYSTEM, "Public", "Every signed-in user. Sees what is open to everyone."),
     RoleCode.DEPARTMENT_ADMIN: (
         RoleScope.ORG_UNIT, "Department admin", "Gives makers, checkers and viewers access to the department.",

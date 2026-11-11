@@ -17,6 +17,16 @@ class DepartmentOut(BaseModel):
     name: str
 
 
+# --------------------------------------------------------------------------- roles
+
+
+class RoleOut(BaseModel):
+    code: str = Field(description='e.g. "CHECKER"')
+    scope: str = Field(description='"system" (system_roles) or "org_unit" (org_unit_roles, per department)')
+    name: str = Field(description='e.g. "Checker"')
+    description: str
+
+
 # --------------------------------------------------------------------------- users
 
 

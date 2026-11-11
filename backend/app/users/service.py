@@ -57,6 +57,20 @@ def sync_roles(db: Session) -> None:
         db.add(role)
 
 
+def list_roles(db: Session) -> list[Role]:
+    """Every role: system roles first, then org unit roles, each sorted by code."""
+    roles = db.scalars(select(Role)).all()
+    return sorted(roles, key=lambda r: (r.scope != RoleScope.SYSTEM.value, r.code))
+
+
+def require_role(db: Session, code: str) -> Role:
+    """The role with this code, case-insensitive (NotFound otherwise)."""
+    role = db.get(Role, code.strip().upper())
+    if role is None:
+        raise NotFound(f"No role {code.strip().upper()!r}.")
+    return role
+
+
 # --------------------------------------------------------------------------- lookups
 
 

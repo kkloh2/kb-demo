@@ -11,6 +11,7 @@
                   /api/departments                         GET, POST; GET, PUT, DELETE /{code}
                                                                                        system admin
                   /api/users                               GET                         system admin
+                  /api/roles, /api/roles/{code}            GET (read-only)             system admin
                   /api/users/{lan_id}                      GET, PUT, DELETE            system admin
                   /api/departments/{code}/users/{lan_id}   PUT, DELETE                 system admin OR that
                                                                                        department's admin
