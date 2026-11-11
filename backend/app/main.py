@@ -10,6 +10,7 @@ from app.auth.hooks import on_sign_in
 from app.core.config import DEV_JWT_SECRET, get_settings
 from app.core.errors import DomainError
 from app.db.session import init_db
+from app.users import routers as users_routers
 from app.users.hooks import add_roles_claim, record_sign_in
 
 log = logging.getLogger("datahub")
@@ -45,6 +46,7 @@ on_sign_in(record_sign_in)  # users: create or refresh the user record at every 
 on_sign_in(add_roles_claim)  # users: put the person's roles in the access token
 
 app.include_router(auth_router.router, prefix="/api")
+app.include_router(users_routers.router, prefix="/api")
 
 
 @app.get("/api/health", tags=["meta"])
