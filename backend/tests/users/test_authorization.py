@@ -280,3 +280,57 @@ def test_delete_user_endpoint(client, people):
     assert client.delete("/api/users/analyst", headers=people["admin"]).status_code == 204
     assert client.delete("/api/users/analyst", headers=people["admin"]).status_code == 404
     assert client.delete("/api/users/admin", headers=people["admin"]).status_code == 409
+
+
+# --------------------------------------------------------------------------- reading users
+
+
+def test_list_users(client, people):
+    client.put("/api/departments/RISK/users/analyst", json={"roles": ["CHECKER", "VIEWER"]},
+               headers=people["risk.admin"])
+    r = client.get("/api/users", headers=people["admin"])
+    assert r.status_code == 200
+    users = {u["lan_id"]: u for u in r.json()}
+    assert list(users) == sorted(users)  # sorted by LAN ID
+    assert set(users) == {"admin", "analyst", "hr.admin", "risk.admin"}
+    assert users["admin"]["system_roles"] == ["PUBLIC", "SYSTEM_ADMIN"]
+    assert users["analyst"] == {
+        "lan_id": "analyst", "display_name": "Alex Tan", "email": "alex.tan@datahub.local",
+        "department": "Risk Management", "title": "Data Analyst",
+        "system_roles": ["PUBLIC"], "org_unit_roles": {"RISK": ["CHECKER", "VIEWER"]},
+    }
+    assert users["risk.admin"]["org_unit_roles"] == {"RISK": ["DEPARTMENT_ADMIN"]}
+
+
+def test_get_one_user(client, people):
+    r = client.get("/api/users/Analyst", headers=people["admin"])
+    assert (r.status_code, r.json()["lan_id"]) == (200, "analyst")
+    assert client.get("/api/users/nobody", headers=people["admin"]).status_code == 404
+
+
+@pytest.mark.parametrize("who", ["risk.admin", "analyst"])
+def test_reading_users_is_system_admin_only(client, people, who):
+    assert client.get("/api/users", headers=people[who]).status_code == 403
+    assert client.get("/api/users/analyst", headers=people[who]).status_code == 403
+
+
+def test_reading_users_needs_sign_in(client):
+    assert client.get("/api/users").status_code == 401
+    assert client.get("/api/users/analyst").status_code == 401
+
+
+def test_list_users_uses_three_queries_however_many_users(client, people):
+    from sqlalchemy import event
+
+    from app.db.session import get_engine, new_session
+    from app.users import service as users_service
+
+    statements = []
+    listener = lambda *args: statements.append(args[2])  # noqa: E731
+    event.listen(get_engine(), "before_cursor_execute", listener)
+    try:
+        with new_session() as db:
+            assert len(users_service.list_users(db)) == 4
+    finally:
+        event.remove(get_engine(), "before_cursor_execute", listener)
+    assert len(statements) == 3

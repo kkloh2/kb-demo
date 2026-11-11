@@ -15,6 +15,19 @@ LanId = Annotated[str, Path(min_length=1, max_length=64, description="LAN ID (ca
 FORBIDDEN_403 = {403: {"description": "Caller lacks the required role"}}
 
 
+def user_out_from(item: service.UserWithRoles) -> UserOut:
+    u = item.user
+    return UserOut(
+        lan_id=u.lan_id,
+        display_name=u.display_name,
+        email=u.email,
+        department=u.department,
+        title=u.title,
+        system_roles=item.system_roles,
+        org_unit_roles=item.org_unit_roles,
+    )
+
+
 def user_out(db: Db, user: User) -> UserOut:
     roles = service.user_roles(db, user)
     return UserOut(

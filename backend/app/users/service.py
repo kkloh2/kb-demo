@@ -214,6 +214,40 @@ class UserResult:
     created: bool
 
 
+@dataclass(frozen=True)
+class UserWithRoles:
+    user: User
+    system_roles: list[str]  # sorted
+    org_unit_roles: dict[str, list[str]]  # department code -> roles, both sorted
+
+
+def list_users(db: Session) -> list[UserWithRoles]:
+    """Every user, sorted by LAN ID, with their roles (three queries, however many users)."""
+    users = db.scalars(select(User).order_by(User.lan_id)).all()
+    system: dict[int, set[str]] = {}
+    for user_id, role in db.execute(select(UserSystemRole.user_id, UserSystemRole.role_code)):
+        system.setdefault(user_id, set()).add(role)
+    org: dict[int, dict[str, set[str]]] = {}
+    for user_id, code, role in db.execute(
+        select(UserOrgUnitRole.user_id, Department.code, UserOrgUnitRole.role_code)
+        .join(Department, Department.id == UserOrgUnitRole.department_id)
+    ):
+        org.setdefault(user_id, {}).setdefault(code, set()).add(role)
+    return [
+        UserWithRoles(
+            user=u,
+            system_roles=sorted(system.get(u.id, set())),
+            org_unit_roles={code: sorted(roles) for code, roles in sorted(org.get(u.id, {}).items())},
+        )
+        for u in users
+    ]
+
+
+def get_user(db: Session, lan_id: str) -> User:
+    """The user with this LAN ID (NotFound otherwise)."""
+    return _require_user(db, lan_id)
+
+
 def user_roles(db: Session, user: User) -> dict[str, Any]:
     """The user's roles in the token's shape (see roles_claims)."""
     return roles_claims(db, user)

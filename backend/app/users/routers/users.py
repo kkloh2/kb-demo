@@ -1,5 +1,7 @@
 """User endpoints.
 
+    GET    /api/users            system admin   every user with their roles, sorted by LAN ID
+    GET    /api/users/{lan_id}   system admin   one user with their roles
     PUT    /api/users/{lan_id}   system admin   create/update a user and all their roles
                                                 (system roles, and org unit roles in any department)
     DELETE /api/users/{lan_id}   system admin   delete a user and all their roles
@@ -13,10 +15,24 @@ from app.auth.dependencies import CurrentUser
 from app.db.session import Db
 from app.users import service
 from app.users.authorization import SystemRoles
-from app.users.routers.common import FORBIDDEN_403, LanId, user_out
+from app.users.routers.common import FORBIDDEN_403, LanId, user_out, user_out_from
 from app.users.schemas import UserOut, UserUpsert
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+@router.get("", response_model=list[UserOut], responses=FORBIDDEN_403)
+@SystemRoles("SYSTEM_ADMIN")
+def list_users(db: Db) -> list[UserOut]:
+    """Every user, sorted by LAN ID, with their system and org unit roles."""
+    return [user_out_from(item) for item in service.list_users(db)]
+
+
+@router.get("/{lan_id}", response_model=UserOut, responses={**FORBIDDEN_403, 404: {"description": "No such user"}})
+@SystemRoles("SYSTEM_ADMIN")
+def get_user(lan_id: LanId, db: Db) -> UserOut:
+    """One user with their system and org unit roles."""
+    return user_out(db, service.get_user(db, lan_id))
 
 
 @router.put(
