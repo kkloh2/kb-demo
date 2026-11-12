@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth.identity import Principal
@@ -219,8 +220,14 @@ def delete_department(db: Session, code: str) -> None:
     """
     department = _require_department(db, code)
     holders = _role_holders(db, department)
-    db.execute(delete(UserOrgUnitRole).where(UserOrgUnitRole.department_id == department.id))
-    db.delete(department)
+    code = department.code
+    try:
+        db.execute(delete(UserOrgUnitRole).where(UserOrgUnitRole.department_id == department.id))
+        db.delete(department)
+        db.flush()  # fails here if another module still has data in the department
+    except IntegrityError:  # e.g. the department still has projects; nothing was deleted
+        db.rollback()
+        raise Conflict(f"{code} still has data in other modules (such as projects). Remove that first.") from None
     for lan_id in holders:
         revoke_sessions(db, lan_id, reason="roles_changed")
     db.commit()
