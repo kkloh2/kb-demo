@@ -8,6 +8,8 @@ DIRECTORY_FILE = _tmp / "ldap-directory.yaml"
 os.environ["DATAHUB_DATABASE_URL"] = f"sqlite:///{_tmp}/test.db"
 os.environ["DATAHUB_ENVIRONMENT"] = "test"
 os.environ["DATAHUB_LDAP_DIRECTORY_FILE"] = str(DIRECTORY_FILE)
+os.environ["DATAHUB_UPLOAD_DIR"] = str(_tmp / "uploads")
+os.environ["DATAHUB_MAX_UPLOAD_MB"] = "1"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

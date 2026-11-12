@@ -6,10 +6,12 @@ interface Props {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  /** A wider dialog, e.g. for a document's metadata. */
+  wide?: boolean;
 }
 
 /** Native <dialog>: focus is trapped inside and Escape closes it. */
-export function Modal({ open, title, onClose, children }: Props) {
+export function Modal({ open, title, onClose, children, wide = false }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -22,7 +24,7 @@ export function Modal({ open, title, onClose, children }: Props) {
   return (
     <dialog
       ref={ref}
-      className="modal"
+      className={wide ? "modal modal--wide" : "modal"}
       aria-labelledby="modal-title"
       onCancel={(e) => {
         e.preventDefault();

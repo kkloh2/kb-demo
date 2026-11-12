@@ -365,3 +365,17 @@
   min-width: 0;
   overflow: auto;
 }
+
+/* ---------- Page content ---------- */
+/* Every page inside the shell: fixed 64px side gutters, full width. */
+.page {
+  padding: var(--sp-10) 64px var(--sp-12);
+}
+
+.page__title {
+  margin: 0 0 var(--sp-6);
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}

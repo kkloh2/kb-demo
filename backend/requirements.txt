@@ -16,6 +16,7 @@ PyJWT==2.15.1
 SQLAlchemy==2.1.8
 PyYAML==6.0.3
 ldap3==2.9.1
+python-multipart==0.0.33  # file uploads (documents)
 
 # --- Tests (direct dependencies) ---------------------------------------------
 pytest==9.2.0

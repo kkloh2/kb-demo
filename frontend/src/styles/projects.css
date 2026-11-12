@@ -1,0 +1,341 @@
+/* Document & metadata management: project pages. Builds on knowledge-bases.css, kb-detail.css, admin.css. */
+
+/* Base metadata on the Metadata tab. */
+.meta-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 var(--sp-8);
+  margin: 0;
+}
+
+.meta-list__row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: var(--sp-4);
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+}
+
+.meta-list dt {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.meta-list dd {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.btn-secondary svg {
+  width: 16px;
+  height: 16px;
+  margin-right: var(--sp-2);
+}
+
+/* Project form: the "Base metadata" heading inside the grid. */
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--sp-2) 0 0;
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-sm);
+}
+
+.form-section > span {
+  font-weight: 700;
+}
+
+.form-section small {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+/* Member form: one role per line with a short explanation. */
+.role-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.check--block {
+  align-items: flex-start;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.check--block input {
+  margin-top: 2px;
+}
+
+.check--block span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.check--block small {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+/* ---------- Documents tab ---------- */
+.modal--wide {
+  width: min(880px, calc(100vw - 32px));
+}
+
+.status--draft {
+  background: var(--gray-100);
+  color: var(--text-secondary);
+}
+
+.btn-sm {
+  height: 32px !important;
+  padding: 0 var(--sp-3) !important;
+}
+
+.btn-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.btn-link svg {
+  width: 14px;
+  height: 14px;
+}
+
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+  padding: var(--sp-2) var(--sp-4);
+  border: 1px solid var(--brand-red);
+  border-radius: var(--radius);
+  background: var(--brand-red-050);
+  font-size: var(--fs-sm);
+}
+
+.bulk-bar__count {
+  margin-right: auto;
+  font-weight: 700;
+  color: var(--brand-red-600);
+}
+
+.crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-3);
+  font-size: var(--fs-sm);
+}
+
+.crumbs__part {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.crumbs__part svg {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+}
+
+.crumbs__item {
+  padding: 2px var(--sp-2);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  font: inherit;
+  color: var(--brand-red-600);
+  cursor: pointer;
+}
+
+.crumbs__item:hover {
+  background: var(--brand-red-050);
+}
+
+.crumbs__item[aria-current="page"] {
+  font-weight: 700;
+  color: var(--text-primary);
+  cursor: default;
+}
+
+.docs-table input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--brand-red);
+  cursor: pointer;
+}
+
+.docs-table tbody tr[aria-selected="true"] {
+  background: var(--brand-red-050);
+}
+
+.doc-name--button {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.doc-name--button:hover .truncate {
+  color: var(--brand-red-600);
+  text-decoration: underline;
+}
+
+.doc-name--button:focus-visible {
+  outline: none;
+  border-radius: var(--radius);
+  box-shadow: var(--focus-ring);
+}
+
+.doc-name__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.doc-name__sub {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.doc-name__icon--folder {
+  background: #fff4e0;
+  color: #b26a00;
+}
+
+/* ---------- Document panel ---------- */
+.doc-panel {
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+}
+
+.doc-panel__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-4);
+}
+
+.doc-panel__name {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-lg);
+  overflow-wrap: anywhere;
+}
+
+.doc-panel__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-3);
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+.meta-section {
+  padding: var(--sp-4) 0;
+  border-top: 1px solid var(--border);
+}
+
+.meta-section__title {
+  margin: 0 0 2px;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+
+.meta-section__desc {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.meta-section__warn {
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-xs);
+  color: #8a5300;
+}
+
+.meta-section--muted .meta-section__title {
+  color: var(--text-secondary);
+}
+
+.tag {
+  margin-left: var(--sp-2);
+  padding: 0 var(--sp-1);
+  border-radius: var(--radius);
+  background: #fff4e0;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: #8a5300;
+}
+
+.required {
+  color: var(--danger);
+}
+
+.extra-row {
+  display: grid;
+  grid-template-columns: 1fr 2fr 32px;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.extra-row input {
+  height: 36px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+.extra-row input[readonly],
+.form-field select:disabled {
+  background: var(--gray-050);
+  color: var(--text-secondary);
+}
+
+/* ---------- Fields editor ---------- */
+.panel + .panel {
+  margin-top: var(--sp-6);
+}
+
+.fields-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.fields-edit__row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 2fr auto 32px;
+  align-items: end;
+  gap: var(--sp-3);
+}
+
+.fields-edit__required {
+  height: 40px;
+  font-size: var(--fs-sm);
+}
+
+.fields-edit__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-3);
+}

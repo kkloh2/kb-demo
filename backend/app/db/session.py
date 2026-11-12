@@ -57,6 +57,7 @@ def _register_models() -> None:
     """Import every feature's models so Base.metadata knows their tables."""
     import app.auth.models  # noqa: F401
     import app.users.models  # noqa: F401
+    import app.documents.models  # noqa: F401
 
 
 def _reference_data(db: Session) -> None:
