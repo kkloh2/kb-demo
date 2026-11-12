@@ -1,199 +1,201 @@
-"""Projects: who can see and manage them, and their members.
+"""Doc-repos: who can see and manage them, and their members.
 
-Department roles come from the caller's token (org_unit_roles); project roles from the database
-(project_members), since they are per resource and checked on every request. Changing someone's
-project roles therefore takes effect immediately, without signing them out.
+Department roles come from the caller's token (org_unit_roles); doc-repo roles from the database
+(doc_repo_members), since they are per resource and checked on every request. Changing someone's
+doc-repo roles therefore takes effect immediately, without signing them out.
 """
 
 from dataclasses import dataclass
-from datetime import date
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth.identity import Principal
 from app.core.errors import Conflict, InvalidRequest, NotFound
-from app.documents.models import PROJECT_ROLE_ORDER, Project, ProjectMember, ProjectRole
+from app.documents.models import DEPARTMENT_METADATA_KEYS, DOC_REPO_ROLE_ORDER, DocRepo, DocRepoMember, DocRepoRole
 from app.users.models import Department, User
 from app.users.service import get_by_lan_id, get_department, org_unit_roles_of
 
-# Department roles that put a department's projects in someone's list.
-LISTING_DEPARTMENT_ROLES = frozenset({"VIEWER", "DEPARTMENT_ADMIN"})
+# Department roles that open a department's doc-repos (their page; documents need more).
+DETAIL_DEPARTMENT_ROLES = frozenset({"VIEWER", "DEPARTMENT_ADMIN"})
 
 
 @dataclass(frozen=True)
-class ProjectAccess:
-    """What the caller can do with one project."""
+class DocRepoAccess:
+    """What the caller can do with one doc-repo."""
 
-    department_roles: frozenset[str]  # the caller's roles in the project's department (token)
-    project_roles: frozenset[str]  # the caller's roles in the project itself (database)
+    department_roles: frozenset[str]  # the caller's roles in the doc-repo's department (token)
+    doc_repo_roles: frozenset[str]  # the caller's roles in the doc-repo itself (database)
 
     @property
     def manage(self) -> bool:
-        """Edit or delete the project and manage its members."""
+        """Edit or delete the doc-repo and manage its members."""
         return "DEPARTMENT_ADMIN" in self.department_roles
 
     @property
-    def listed(self) -> bool:
-        return bool(self.project_roles) or bool(LISTING_DEPARTMENT_ROLES & self.department_roles)
+    def view_details(self) -> bool:
+        """Open the doc-repo's page: any doc-repo role, or VIEWER / DEPARTMENT_ADMIN of its department.
+        (Everyone with the PUBLIC system role sees it in the list.)"""
+        return bool(self.doc_repo_roles) or bool(DETAIL_DEPARTMENT_ROLES & self.department_roles)
 
     @property
     def view_documents(self) -> bool:
-        """Any project role, or the department admin (a viewer of every project by default)."""
-        return bool(self.project_roles) or self.manage
+        """Any doc-repo role, or the department admin (a viewer of every doc-repo by default)."""
+        return bool(self.doc_repo_roles) or self.manage
 
     @property
     def upload(self) -> bool:
-        return ProjectRole.MAKER.value in self.project_roles
+        return DocRepoRole.MAKER.value in self.doc_repo_roles
 
     @property
     def review(self) -> bool:
-        return ProjectRole.CHECKER.value in self.project_roles
+        return DocRepoRole.CHECKER.value in self.doc_repo_roles
 
 
 @dataclass(frozen=True)
-class ProjectWithAccess:
-    project: Project
-    access: ProjectAccess
+class DocRepoWithAccess:
+    doc_repo: DocRepo
+    access: DocRepoAccess
 
 
 # --------------------------------------------------------------------------- lookups & access
 
 
-def get_project(db: Session, project_id: int) -> Project:
-    project = db.scalar(select(Project).where(Project.id == project_id).options(selectinload(Project.department)))
-    if project is None:
-        raise NotFound(f"No project {project_id}.")
-    return project
+def get_doc_repo(db: Session, doc_repo_id: int) -> DocRepo:
+    doc_repo = db.scalar(select(DocRepo).where(DocRepo.id == doc_repo_id).options(selectinload(DocRepo.department)))
+    if doc_repo is None:
+        raise NotFound(f"No document repository {doc_repo_id}.")
+    return doc_repo
 
 
-def project_roles_of(db: Session, lan_id: str, project_id: int) -> frozenset[str]:
-    """The user's roles in the project, from the database."""
+def doc_repo_roles_of(db: Session, lan_id: str, doc_repo_id: int) -> frozenset[str]:
+    """The user's roles in the doc-repo, from the database."""
     return frozenset(db.scalars(
-        select(ProjectMember.role)
-        .join(User, User.id == ProjectMember.user_id)
-        .where(ProjectMember.project_id == project_id, User.lan_id == lan_id.strip().lower())
+        select(DocRepoMember.role)
+        .join(User, User.id == DocRepoMember.user_id)
+        .where(DocRepoMember.doc_repo_id == doc_repo_id, User.lan_id == lan_id.strip().lower())
     ))
 
 
-def access_to(db: Session, principal: Principal, project: Project) -> ProjectAccess:
-    return ProjectAccess(
-        department_roles=org_unit_roles_of(principal).get(project.department.code, frozenset()),
-        project_roles=project_roles_of(db, principal.lan_id, project.id),
+def access_to(db: Session, principal: Principal, doc_repo: DocRepo) -> DocRepoAccess:
+    return DocRepoAccess(
+        department_roles=org_unit_roles_of(principal).get(doc_repo.department.code, frozenset()),
+        doc_repo_roles=doc_repo_roles_of(db, principal.lan_id, doc_repo.id),
     )
 
 
-def list_projects(db: Session, principal: Principal) -> list[ProjectWithAccess]:
-    """Projects the caller can see: their departments' (as VIEWER or DEPARTMENT_ADMIN), plus any
-    project they hold a role in. Most recently updated first."""
+def list_doc_repos(db: Session, principal: Principal) -> list[DocRepoWithAccess]:
+    """Every doc-repo, most recently updated first, with what the caller can do with each. The
+    endpoint lets in callers with the PUBLIC system role; opening one needs more (see view_details)."""
     department_roles = org_unit_roles_of(principal)
-    codes = [code for code, roles in department_roles.items() if LISTING_DEPARTMENT_ROLES & roles]
     my_roles: dict[int, set[str]] = {}
-    for project_id, role in db.execute(
-        select(ProjectMember.project_id, ProjectMember.role)
-        .join(User, User.id == ProjectMember.user_id)
+    for doc_repo_id, role in db.execute(
+        select(DocRepoMember.doc_repo_id, DocRepoMember.role)
+        .join(User, User.id == DocRepoMember.user_id)
         .where(User.lan_id == principal.lan_id)
     ):
-        my_roles.setdefault(project_id, set()).add(role)
+        my_roles.setdefault(doc_repo_id, set()).add(role)
 
-    projects = db.scalars(
-        select(Project)
-        .join(Department, Department.id == Project.department_id)
-        .where(or_(Department.code.in_(codes), Project.id.in_(my_roles)))
-        .options(selectinload(Project.department))
-        .order_by(Project.updated_at.desc(), Project.id.desc())
+    doc_repos = db.scalars(
+        select(DocRepo)
+        .options(selectinload(DocRepo.department))
+        .order_by(DocRepo.updated_at.desc(), DocRepo.id.desc())
     ).all()
     return [
-        ProjectWithAccess(p, ProjectAccess(
+        DocRepoWithAccess(p, DocRepoAccess(
             department_roles=department_roles.get(p.department.code, frozenset()),
-            project_roles=frozenset(my_roles.get(p.id, ())),
+            doc_repo_roles=frozenset(my_roles.get(p.id, ())),
         ))
-        for p in projects
+        for p in doc_repos
     ]
 
 
 def manageable_departments(db: Session, principal: Principal) -> list[Department]:
-    """Departments the caller administers, i.e. can create projects in. Sorted by code."""
+    """Departments the caller administers, i.e. can create doc-repos in. Sorted by code."""
     codes = [code for code, roles in org_unit_roles_of(principal).items() if "DEPARTMENT_ADMIN" in roles]
     return list(db.scalars(select(Department).where(Department.code.in_(codes)).order_by(Department.code)))
 
 
-# --------------------------------------------------------------------------- projects
+# --------------------------------------------------------------------------- doc-repos
 #
-# Called from endpoints guarded by @OrgUnitRoles / @ProjectRoles: they check the caller.
+# Called from endpoints guarded by @OrgUnitRoles / @DocRepoRoles: they check the caller.
 
 
 @dataclass(frozen=True)
-class ProjectFields:
+class DocRepoFields:
     name: str
     description: str = ""
-    country: str = ""
-    business_unit: str = ""
-    purpose: str = ""
-    valid_till: date | None = None
+    department_metadata: dict[str, str] | None = None  # DEPARTMENT_METADATA_KEYS
 
-    def cleaned(self) -> "ProjectFields":
+    def cleaned(self) -> "DocRepoFields":
         name = self.name.strip()
         if not name:
-            raise InvalidRequest("Enter a project name.")
-        return ProjectFields(
+            raise InvalidRequest("Enter a repository name.")
+        return DocRepoFields(
             name=name,
             description=self.description.strip(),
-            country=self.country.strip(),
-            business_unit=self.business_unit.strip(),
-            purpose=self.purpose.strip(),
-            valid_till=self.valid_till,
+            department_metadata=clean_department_metadata(self.department_metadata or {}),
         )
 
 
-def create_project(db: Session, actor_lan_id: str, department_code: str, fields: ProjectFields) -> Project:
-    """Create a project in the department. Callers must be its DEPARTMENT_ADMIN."""
+def create_doc_repo(db: Session, actor_lan_id: str, department_code: str, fields: DocRepoFields) -> DocRepo:
+    """Create a doc-repo in the department. Callers must be its DEPARTMENT_ADMIN."""
     department = get_department(db, department_code)
     if department is None:
         raise NotFound(f"No department {department_code.strip().upper()!r}.")
     f = fields.cleaned()
     _require_unique_name(db, department.id, f.name)
+    if not f.department_metadata["department"]:
+        f.department_metadata["department"] = department.name
     actor = get_by_lan_id(db, actor_lan_id)
-    project = Project(department_id=department.id, created_by_id=actor.id if actor else None, **_columns(f))
-    db.add(project)
+    doc_repo = DocRepo(department_id=department.id, created_by_id=actor.id if actor else None, **_columns(f))
+    db.add(doc_repo)
     db.commit()
-    return get_project(db, project.id)
+    return get_doc_repo(db, doc_repo.id)
 
 
-def update_project(db: Session, project_id: int, fields: ProjectFields) -> Project:
-    """Replace the project's name, description and base metadata."""
-    project = get_project(db, project_id)
+def update_doc_repo(db: Session, doc_repo_id: int, fields: DocRepoFields) -> DocRepo:
+    """Replace the doc-repo's name, description and department metadata."""
+    doc_repo = get_doc_repo(db, doc_repo_id)
     f = fields.cleaned()
-    if f.name != project.name:
-        _require_unique_name(db, project.department_id, f.name, other_than=project.id)
+    if f.name != doc_repo.name:
+        _require_unique_name(db, doc_repo.department_id, f.name, other_than=doc_repo.id)
     for column, value in _columns(f).items():
-        setattr(project, column, value)
+        setattr(doc_repo, column, value)
     db.commit()
-    return get_project(db, project.id)
+    return get_doc_repo(db, doc_repo.id)
 
 
-def delete_project(db: Session, project_id: int) -> None:
-    """Delete the project with its members, fields and documents (stored files included)."""
-    from app.documents.documents import delete_project_files  # local import: avoids a cycle
+def delete_doc_repo(db: Session, doc_repo_id: int) -> None:
+    """Delete the doc-repo with its members, fields and documents (stored files included)."""
+    from app.documents.documents import delete_doc_repo_files  # local import: avoids a cycle
 
-    db.delete(get_project(db, project_id))
+    db.delete(get_doc_repo(db, doc_repo_id))
     db.commit()
-    delete_project_files(project_id)
+    delete_doc_repo_files(doc_repo_id)
 
 
-def _columns(f: ProjectFields) -> dict:
+def _columns(f: DocRepoFields) -> dict:
     return {
-        "name": f.name, "description": f.description, "country": f.country,
-        "business_unit": f.business_unit, "purpose": f.purpose, "valid_till": f.valid_till,
+        "name": f.name, "description": f.description, "department_metadata": f.department_metadata,
     }
 
 
+def clean_department_metadata(values: dict[str, str | None]) -> dict[str, str]:
+    """Every key of DEPARTMENT_METADATA_KEYS, trimmed ("" when missing); other keys are refused."""
+    unknown = set(values) - set(DEPARTMENT_METADATA_KEYS)
+    if unknown:
+        raise InvalidRequest(f"Department metadata is {', '.join(DEPARTMENT_METADATA_KEYS)}, "
+                             f"not {', '.join(sorted(unknown))}.")
+    return {k: (values.get(k) or "").strip() for k in DEPARTMENT_METADATA_KEYS}
+
+
 def _require_unique_name(db: Session, department_id: int, name: str, other_than: int | None = None) -> None:
-    query = select(Project.id).where(Project.department_id == department_id, Project.name == name)
+    query = select(DocRepo.id).where(DocRepo.department_id == department_id, DocRepo.name == name)
     if other_than is not None:
-        query = query.where(Project.id != other_than)
+        query = query.where(DocRepo.id != other_than)
     if db.scalar(query) is not None:
-        raise Conflict(f"This department already has a project called {name!r}.")
+        raise Conflict(f"This department already has a document repository called {name!r}.")
 
 
 # --------------------------------------------------------------------------- members
@@ -202,28 +204,28 @@ def _require_unique_name(db: Session, department_id: int, name: str, other_than:
 @dataclass(frozen=True)
 class Member:
     user: User
-    roles: list[str]  # in PROJECT_ROLE_ORDER
+    roles: list[str]  # in DOC_REPO_ROLE_ORDER
 
 
-def list_members(db: Session, project_id: int) -> list[Member]:
-    """The project's members with their roles, sorted by name."""
-    get_project(db, project_id)
+def list_members(db: Session, doc_repo_id: int) -> list[Member]:
+    """The doc-repo's members with their roles, sorted by name."""
+    get_doc_repo(db, doc_repo_id)
     by_user: dict[int, tuple[User, set[str]]] = {}
     for member in db.scalars(
-        select(ProjectMember).where(ProjectMember.project_id == project_id).options(selectinload(ProjectMember.user))
+        select(DocRepoMember).where(DocRepoMember.doc_repo_id == doc_repo_id).options(selectinload(DocRepoMember.user))
     ):
         by_user.setdefault(member.user_id, (member.user, set()))[1].add(member.role)
     members = [Member(user, _ordered(roles)) for user, roles in by_user.values()]
     return sorted(members, key=lambda m: (m.user.display_name.lower(), m.user.lan_id))
 
 
-def set_member_roles(db: Session, actor_lan_id: str, project_id: int, lan_id: str, roles: list[str]) -> Member:
-    """Make the user's roles in the project exactly `roles` ([] removes them from the project).
-    MAKER and CHECKER can't be held together in one project."""
-    wanted = _parse_project_roles(roles)
-    if {ProjectRole.MAKER.value, ProjectRole.CHECKER.value} <= wanted:
-        raise Conflict("One person can't be both maker and checker in a project.")
-    get_project(db, project_id)
+def set_member_roles(db: Session, actor_lan_id: str, doc_repo_id: int, lan_id: str, roles: list[str]) -> Member:
+    """Make the user's roles in the doc-repo exactly `roles` ([] removes them from the doc-repo).
+    MAKER and CHECKER can't be held together in one doc-repo."""
+    wanted = _parse_doc_repo_roles(roles)
+    if {DocRepoRole.MAKER.value, DocRepoRole.CHECKER.value} <= wanted:
+        raise Conflict("One person can't be both maker and checker in a document repository.")
+    get_doc_repo(db, doc_repo_id)
     user = get_by_lan_id(db, lan_id)
     if user is None:
         raise NotFound(
@@ -232,27 +234,27 @@ def set_member_roles(db: Session, actor_lan_id: str, project_id: int, lan_id: st
         )
     actor = get_by_lan_id(db, actor_lan_id)
     current = {m.role: m for m in db.scalars(
-        select(ProjectMember).where(ProjectMember.project_id == project_id, ProjectMember.user_id == user.id)
+        select(DocRepoMember).where(DocRepoMember.doc_repo_id == doc_repo_id, DocRepoMember.user_id == user.id)
     )}
     for role in set(current) - wanted:
         db.delete(current[role])
     db.flush()
     for role in wanted - set(current):
-        db.add(ProjectMember(project_id=project_id, user_id=user.id, role=role,
+        db.add(DocRepoMember(doc_repo_id=doc_repo_id, user_id=user.id, role=role,
                              granted_by_id=actor.id if actor else None))
     db.commit()
     return Member(user, _ordered(wanted))
 
 
-def _parse_project_roles(names: list[str]) -> set[str]:
+def _parse_doc_repo_roles(names: list[str]) -> set[str]:
     roles = set()
     for name in names:
         code = name.strip().upper()
-        if code not in ProjectRole.__members__:
-            raise InvalidRequest(f"Project roles are MAKER, CHECKER and VIEWER, not {name!r}.")
+        if code not in DocRepoRole.__members__:
+            raise InvalidRequest(f"Repository roles are MAKER, CHECKER and VIEWER, not {name!r}.")
         roles.add(code)
     return roles
 
 
 def _ordered(roles: set[str]) -> list[str]:
-    return [r.value for r in PROJECT_ROLE_ORDER if r.value in roles]
+    return [r.value for r in DOC_REPO_ROLE_ORDER if r.value in roles]

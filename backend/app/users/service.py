@@ -225,9 +225,9 @@ def delete_department(db: Session, code: str) -> None:
         db.execute(delete(UserOrgUnitRole).where(UserOrgUnitRole.department_id == department.id))
         db.delete(department)
         db.flush()  # fails here if another module still has data in the department
-    except IntegrityError:  # e.g. the department still has projects; nothing was deleted
+    except IntegrityError:  # e.g. the department still has doc-repos; nothing was deleted
         db.rollback()
-        raise Conflict(f"{code} still has data in other modules (such as projects). Remove that first.") from None
+        raise Conflict(f"{code} still has data in other modules (such as document repositories). Remove that first.") from None
     for lan_id in holders:
         revoke_sessions(db, lan_id, reason="roles_changed")
     db.commit()

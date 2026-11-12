@@ -1,33 +1,31 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { ApiError } from "../../api/http";
 import {
-  createProject,
+  createDocRepo,
   creatableDepartments,
-  updateProject,
+  updateDocRepo,
+  type DepartmentMetadata,
   type DepartmentRef,
-  type Project,
-  type ProjectFields,
-} from "../../api/projects";
+  type DocRepo,
+  type DocRepoFields,
+} from "../../api/doc-repos";
 
 interface Props {
   token: string;
-  existing: Project | null; // null: create
+  existing: DocRepo | null; // null: create
   onCancel: () => void;
-  onSaved: (project: Project, created: boolean) => void;
+  onSaved: (docRepo: DocRepo, created: boolean) => void;
   onSessionEnded: (message: string) => void;
 }
 
-/** Create a project (department admins) or edit its name, description and base metadata. */
-export function ProjectForm({ token, existing, onCancel, onSaved, onSessionEnded }: Props) {
+/** Create a doc-repo (department admins) or edit its name, description and department metadata. */
+export function DocRepoForm({ token, existing, onCancel, onSaved, onSessionEnded }: Props) {
   const [departments, setDepartments] = useState<DepartmentRef[] | null>(existing ? [existing.department] : null);
   const [department, setDepartment] = useState(existing?.department.code ?? "");
-  const [form, setForm] = useState<ProjectFields>({
+  const [form, setForm] = useState<DocRepoFields>({
     name: existing?.name ?? "",
     description: existing?.description ?? "",
-    country: existing?.country ?? "",
-    business_unit: existing?.business_unit ?? "",
-    purpose: existing?.purpose ?? "",
-    valid_till: existing?.valid_till ?? null,
+    department_metadata: existing?.department_metadata ?? { department: "", business_unit: "", country: "" },
   });
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -42,8 +40,11 @@ export function ProjectForm({ token, existing, onCancel, onSaved, onSessionEnded
       .catch((e: Error) => setError(e.message));
   }, [existing, token]);
 
-  const set = (k: keyof ProjectFields) => (e: { target: { value: string } }) =>
-    setForm((f) => ({ ...f, [k]: k === "valid_till" ? e.target.value || null : e.target.value }));
+  const set = (k: "name" | "description") => (e: { target: { value: string } }) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+  const setMeta = (k: keyof DepartmentMetadata) => (e: { target: { value: string } }) =>
+    setForm((f) => ({ ...f, department_metadata: { ...f.department_metadata, [k]: e.target.value } }));
+  const departmentName = existing?.department.name ?? departments?.find((d) => d.code === department)?.name;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -51,12 +52,12 @@ export function ProjectForm({ token, existing, onCancel, onSaved, onSessionEnded
     setSaving(true);
     try {
       const saved = existing
-        ? await updateProject(token, existing.id, form)
-        : await createProject(token, department, form);
+        ? await updateDocRepo(token, existing.id, form)
+        : await createDocRepo(token, department, form);
       onSaved(saved, existing === null);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) onSessionEnded(err.message);
-      else setError(err instanceof Error ? err.message : "Couldn't save the project.");
+      else setError(err instanceof Error ? err.message : "Couldn't save the repository.");
       setSaving(false);
     }
   }
@@ -88,34 +89,32 @@ export function ProjectForm({ token, existing, onCancel, onSaved, onSessionEnded
             )}
           </label>
           <label className="form-field">
-            <span>Project name</span>
+            <span>Repository name</span>
             <input value={form.name} onChange={set("name")} placeholder="e.g. Card Policies" required autoFocus />
           </label>
           <label className="form-field form-field--wide">
             <span>Description</span>
             <textarea rows={2} value={form.description} onChange={set("description")}
-              placeholder="What this project's documents are for" />
+              placeholder="What this repository's documents are for" />
           </label>
 
           <p className="form-section form-field--wide">
-            <span>Base metadata</span>
-            <small>Every document in the project starts with these. A maker can override them per document.</small>
+            <span>Department metadata</span>
+            <small>Every document in the repository starts with these. A maker can override them per document.</small>
           </p>
           <label className="form-field">
-            <span>Country</span>
-            <input value={form.country} onChange={set("country")} placeholder="e.g. Singapore" />
+            <span>Department</span>
+            <input value={form.department_metadata.department} onChange={setMeta("department")}
+              placeholder={departmentName ? `Defaults to ${departmentName}` : "Defaults to the department's name"} />
           </label>
           <label className="form-field">
             <span>Business unit</span>
-            <input value={form.business_unit} onChange={set("business_unit")} placeholder="e.g. Consumer Banking" />
+            <input value={form.department_metadata.business_unit} onChange={setMeta("business_unit")}
+              placeholder="e.g. Consumer Banking" />
           </label>
           <label className="form-field">
-            <span>Purpose</span>
-            <input value={form.purpose} onChange={set("purpose")} placeholder="e.g. Credit card, Loan" />
-          </label>
-          <label className="form-field">
-            <span>Valid till</span>
-            <input type="date" value={form.valid_till ?? ""} onChange={set("valid_till")} />
+            <span>Country</span>
+            <input value={form.department_metadata.country} onChange={setMeta("country")} placeholder="e.g. Singapore" />
           </label>
         </div>
       </div>
@@ -124,7 +123,7 @@ export function ProjectForm({ token, existing, onCancel, onSaved, onSessionEnded
           Cancel
         </button>
         <button type="submit" className="btn-primary" disabled={saving || (!existing && !department)}>
-          {saving ? "Saving…" : existing ? "Save" : "Create project"}
+          {saving ? "Saving…" : existing ? "Save" : "Create repository"}
         </button>
       </div>
     </form>

@@ -10,11 +10,11 @@ import {
   uploadDocuments,
   type BulkResult,
   type DocumentStatus,
-  type FieldDef,
-  type ProjectDocument,
+  type MetadataPair,
+  type DocRepoDocument,
 } from "../../api/documents";
 import { ApiError } from "../../api/http";
-import type { Project } from "../../api/projects";
+import type { DocRepo } from "../../api/doc-repos";
 import {
   CheckIcon,
   ChevronIcon,
@@ -42,20 +42,19 @@ type Notice = { kind: "ok" | "error"; text: string } | null;
 
 interface Props {
   token: string;
-  project: Project;
+  docRepo: DocRepo;
   onSessionEnded: (message: string) => void;
   onCountChange?: (count: number) => void;
 }
 
-/** The project's documents, browsable by folder, with upload, bulk submit / review / delete. */
-export function DocumentsTab({ token, project, onSessionEnded, onCountChange }: Props) {
-  const { access } = project;
-  const [docs, setDocs] = useState<ProjectDocument[] | null>(null);
-  const [fields, setFields] = useState<FieldDef[]>([]);
+/** The doc-repo's documents, browsable by folder, with upload, and submit / review / delete per document. */
+export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: Props) {
+  const { access } = docRepo;
+  const [docs, setDocs] = useState<DocRepoDocument[] | null>(null);
+  const [repoPairs, setRepoPairs] = useState<MetadataPair[]>([]);
   const [folder, setFolder] = useState("");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
-  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [openId, setOpenId] = useState<number | null>(null);
   const [rejecting, setRejecting] = useState<number[] | null>(null);
   const [deleting, setDeleting] = useState<number[] | null>(null);
@@ -73,15 +72,14 @@ export function DocumentsTab({ token, project, onSessionEnded, onCountChange }: 
   );
 
   const load = useCallback(() => {
-    listDocuments(token, project.id)
+    listDocuments(token, docRepo.id)
       .then((r) => {
         setDocs(r.documents);
-        setFields(r.fields);
+        setRepoPairs(r.repository_metadata);
         onCountChange?.(r.documents.length);
-        setSelected((s) => new Set([...s].filter((id) => r.documents.some((d) => d.id === id))));
       })
       .catch(fail);
-  }, [token, project.id, fail, onCountChange]);
+  }, [token, docRepo.id, fail, onCountChange]);
   useEffect(load, [load]);
 
   // Folder pickers need the non-standard webkitdirectory attribute.
@@ -99,7 +97,7 @@ export function DocumentsTab({ token, project, onSessionEnded, onCountChange }: 
         (!q ||
           d.filename.toLowerCase().includes(q) ||
           d.folder.toLowerCase().includes(q) ||
-          Object.values({ ...d.fields, ...d.extra, ...d.base }).some((v) => String(v ?? "").toLowerCase().includes(q))),
+          Object.values({ ...d.repository_metadata, ...d.extra, ...d.department_metadata }).some((v) => String(v ?? "").toLowerCase().includes(q))),
     );
   }, [docs, query, status]);
 
@@ -121,12 +119,6 @@ export function DocumentsTab({ token, project, onSessionEnded, onCountChange }: 
   }, [docs, folder, matches, searching]);
 
   const { rows, ...pager } = usePagination(files);
-  const selectedDocs = (docs ?? []).filter((d) => selected.has(d.id));
-  const can = {
-    submit: selectedDocs.some((d) => d.actions.submit),
-    review: selectedDocs.some((d) => d.actions.review),
-    delete: selectedDocs.some((d) => d.actions.delete),
-  };
 
   // ---------------------------------------------------------------- actions
   function report(verb: string, r: BulkResult) {
@@ -141,7 +133,6 @@ export function DocumentsTab({ token, project, onSessionEnded, onCountChange }: 
     setNotice(null);
     try {
       report(verb, await action());
-      setSelected(new Set());
       load();
     } catch (e) {
       fail(e);
@@ -171,7 +162,7 @@ export function DocumentsTab({ token, project, onSessionEnded, onCountChange }: 
     setBusy(`Uploading ${usable.length}…`);
     setNotice(null);
     try {
-      const created = await uploadDocuments(token, project.id, usable);
+      const created = await uploadDocuments(token, docRepo.id, usable);
       setNotice({
         kind: "ok",
         text:
@@ -187,36 +178,15 @@ export function DocumentsTab({ token, project, onSessionEnded, onCountChange }: 
     }
   }
 
-  function toggle(id: number) {
-    setSelected((s) => {
-      const next = new Set(s);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  const allOnPageSelected = rows.length > 0 && rows.every((d) => selected.has(d.id));
-  function toggleAll() {
-    setSelected((s) => {
-      const next = new Set(s);
-      for (const d of rows) {
-        if (allOnPageSelected) next.delete(d.id);
-        else next.add(d.id);
-      }
-      return next;
-    });
-  }
-
-  const rowMenu = (d: ProjectDocument): MenuItem[] => [
+  const rowMenu = (d: DocRepoDocument): MenuItem[] => [
     { label: "Open", icon: <FileIcon />, onSelect: () => setOpenId(d.id) },
     { label: "Download", icon: <DownloadIcon />, onSelect: () => downloadDocument(token, d).catch(fail) },
     ...(d.actions.submit
-      ? [{ label: "Submit for review", icon: <UploadIcon />, onSelect: () => run("submit", () => submitDocuments(token, project.id, [d.id]), "Submitted") }]
+      ? [{ label: "Submit for review", icon: <UploadIcon />, onSelect: () => run("submit", () => submitDocuments(token, docRepo.id, [d.id]), "Submitted") }]
       : []),
     ...(d.actions.review
       ? [
-          { label: "Approve", icon: <CheckIcon />, onSelect: () => run("approve", () => reviewDocuments(token, project.id, [d.id], "approve"), "Approved") },
+          { label: "Approve", icon: <CheckIcon />, onSelect: () => run("approve", () => reviewDocuments(token, docRepo.id, [d.id], "approve"), "Approved") },
           { label: "Reject…", icon: <CloseIcon />, danger: true, onSelect: () => setRejecting([d.id]) },
         ]
       : []),
@@ -228,7 +198,7 @@ export function DocumentsTab({ token, project, onSessionEnded, onCountChange }: 
     return (
       <div className="kb-table-panel">
         <p className="kb-message">
-          You can see this project, but not its documents. Ask a department admin of {project.department.name} for a
+          You can see this repository, but not its documents. Ask a department admin of {docRepo.department.name} for a
           role in it.
         </p>
       </div>
@@ -295,41 +265,6 @@ export function DocumentsTab({ token, project, onSessionEnded, onCountChange }: 
         </p>
       )}
 
-      {selected.size > 0 && (
-        <div className="bulk-bar" role="region" aria-label="Selected documents">
-          <span className="bulk-bar__count">{selected.size} selected</span>
-          {can.submit && (
-            <button type="button" className="btn-primary btn-sm" disabled={busy !== null}
-              onClick={() => run("submit", () => submitDocuments(token, project.id, [...selected]), "Submitted")}>
-              <UploadIcon />
-              Submit for review
-            </button>
-          )}
-          {can.review && (
-            <>
-              <button type="button" className="btn-primary btn-sm" disabled={busy !== null}
-                onClick={() => run("approve", () => reviewDocuments(token, project.id, [...selected], "approve"), "Approved")}>
-                <CheckIcon />
-                Approve
-              </button>
-              <button type="button" className="btn-outline btn-sm" disabled={busy !== null}
-                onClick={() => setRejecting([...selected])}>
-                Reject…
-              </button>
-            </>
-          )}
-          {can.delete && (
-            <button type="button" className="btn-link btn-link--danger" disabled={busy !== null}
-              onClick={() => setDeleting([...selected])}>
-              Delete…
-            </button>
-          )}
-          <button type="button" className="btn-link" onClick={() => setSelected(new Set())}>
-            Clear
-          </button>
-        </div>
-      )}
-
       {!searching && (
         <nav className="crumbs" aria-label="Folder">
           <button type="button" className="crumbs__item" aria-current={folder === "" ? "page" : undefined}
@@ -368,7 +303,6 @@ export function DocumentsTab({ token, project, onSessionEnded, onCountChange }: 
           <>
             <table className="data-table docs-table">
               <colgroup>
-                <col style={{ width: "44px" }} />
                 <col />
                 <col style={{ width: "150px" }} />
                 <col style={{ width: "18%" }} />
@@ -377,10 +311,6 @@ export function DocumentsTab({ token, project, onSessionEnded, onCountChange }: 
               </colgroup>
               <thead>
                 <tr>
-                  <th scope="col">
-                    <input type="checkbox" aria-label="Select all on this page" checked={allOnPageSelected}
-                      onChange={toggleAll} disabled={rows.length === 0} />
-                  </th>
                   <th scope="col">Name</th>
                   <th scope="col">Status</th>
                   <th scope="col">Uploaded by</th>
@@ -393,7 +323,6 @@ export function DocumentsTab({ token, project, onSessionEnded, onCountChange }: 
               <tbody>
                 {subfolders.map((f) => (
                   <tr key={`folder:${f.name}`} className="docs-table__folder">
-                    <td />
                     <td>
                       <button type="button" className="doc-name doc-name--button"
                         onClick={() => setFolder(folder ? `${folder}/${f.name}` : f.name)}>
@@ -409,11 +338,7 @@ export function DocumentsTab({ token, project, onSessionEnded, onCountChange }: 
                   </tr>
                 ))}
                 {rows.map((d) => (
-                  <tr key={d.id} aria-selected={selected.has(d.id)}>
-                    <td>
-                      <input type="checkbox" aria-label={`Select ${d.filename}`} checked={selected.has(d.id)}
-                        onChange={() => toggle(d.id)} />
-                    </td>
+                  <tr key={d.id}>
                     <td>
                       <button type="button" className="doc-name doc-name--button" onClick={() => setOpenId(d.id)}
                         title={`${d.folder ? `${d.folder}/` : ""}${d.filename}`}>
@@ -460,11 +385,10 @@ export function DocumentsTab({ token, project, onSessionEnded, onCountChange }: 
         {openId !== null && (
           <DocumentPanel
             token={token}
-            projectId={project.id}
+            docRepoId={docRepo.id}
             documentId={openId}
-            fields={fields}
-            projectBase={{ country: project.country, business_unit: project.business_unit, purpose: project.purpose,
-              valid_till: project.valid_till }}
+            repoPairs={repoPairs}
+            repoDefaults={docRepo.department_metadata}
             onClose={() => setOpenId(null)}
             onChanged={(message) => {
               if (message) setNotice({ kind: "ok", text: message });
@@ -483,20 +407,18 @@ export function DocumentsTab({ token, project, onSessionEnded, onCountChange }: 
             onReject={(reason) => {
               const ids = rejecting;
               setRejecting(null);
-              return run("reject", () => reviewDocuments(token, project.id, ids, "reject", reason), "Rejected");
+              return run("reject", () => reviewDocuments(token, docRepo.id, ids, "reject", reason), "Rejected");
             }}
           />
         )}
       </Modal>
 
-      <Modal open={deleting !== null} title="Delete documents" onClose={() => setDeleting(null)}>
+      <Modal open={deleting !== null} title="Delete document" onClose={() => setDeleting(null)}>
         {deleting && (
           <>
             <div className="modal__body">
               <p className="modal__text">
-                Delete {deleting.length === 1 ? "this document" : `${deleting.length} documents`} and the stored
-                file{deleting.length === 1 ? "" : "s"}? Only drafts and rejected documents are deleted; others are
-                skipped.
+                Delete this document and its stored file? This can't be undone.
               </p>
             </div>
             <div className="modal__footer">
@@ -506,7 +428,7 @@ export function DocumentsTab({ token, project, onSessionEnded, onCountChange }: 
               <button type="button" className="btn-danger" onClick={() => {
                 const ids = deleting;
                 setDeleting(null);
-                run("delete", () => deleteDocuments(token, project.id, ids), "Deleted");
+                run("delete", () => deleteDocuments(token, docRepo.id, ids), "Deleted");
               }}>
                 Delete
               </button>

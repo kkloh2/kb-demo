@@ -1,27 +1,26 @@
 import { useMemo, useState } from "react";
-import { PROJECT_ROLE_NAMES, type Project } from "../../api/projects";
+import { type DocRepo } from "../../api/doc-repos";
 import { MoreIcon, SortIcon } from "../../components/Icons";
 import { Menu, type MenuItem } from "../../components/Menu";
 import { Pager, usePagination } from "../../components/Pager";
 import { timeAgo } from "../../lib/time";
 
-type SortKey = "name" | "department" | "purpose" | "updated_at";
+type SortKey = "name" | "department" | "updated_at";
 type SortDir = "asc" | "desc";
 
 interface Props {
-  items: Project[];
-  menuItems: (p: Project) => MenuItem[];
+  items: DocRepo[];
+  menuItems: (p: DocRepo) => MenuItem[];
 }
 
-/** List view of projects, like main's knowledge base table: sortable columns and pagination. */
-export function ProjectTable({ items, menuItems }: Props) {
+/** List view of doc-repos, like main's knowledge base table: sortable columns and pagination. */
+export function DocRepoTable({ items, menuItems }: Props) {
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "updated_at", dir: "desc" });
 
   const sorted = useMemo(() => {
-    const value = (p: Project) =>
+    const value = (p: DocRepo) =>
       sort.key === "department" ? p.department.name.toLowerCase()
       : sort.key === "name" ? p.name.toLowerCase()
-      : sort.key === "purpose" ? p.purpose.toLowerCase()
       : p.updated_at;
     const out = [...items].sort((a, b) => (value(a) < value(b) ? -1 : value(a) > value(b) ? 1 : 0));
     return sort.dir === "asc" ? out : out.reverse();
@@ -61,16 +60,14 @@ export function ProjectTable({ items, menuItems }: Props) {
           <col className="kb-table__col-name" />
           <col />
           <col className="kb-table__col-department" />
-          <col style={{ width: "14%" }} />
           <col className="kb-table__col-updated" />
           <col className="kb-table__col-actions" />
         </colgroup>
         <thead>
           <tr>
-            {header("Project name", "name")}
+            {header("Repository name", "name")}
             {header("Description")}
             {header("Department", "department")}
-            {header("Purpose", "purpose")}
             {header("Last updated", "updated_at")}
             <th scope="col">
               <span className="sr-only">Actions</span>
@@ -82,21 +79,20 @@ export function ProjectTable({ items, menuItems }: Props) {
             <tr key={p.id}>
               <td>
                 <div className="kb-table__name">
-                  <a className="kb-table__link" href={`#project/${p.id}`}>
-                    {p.name}
-                  </a>
+                  {p.access.view_details ? (
+                    <a className="kb-table__link" href={`#doc-repo/${p.id}`}>
+                      {p.name}
+                    </a>
+                  ) : (
+                    <span className="kb-table__locked" title={`Listed for everyone. To open it, ask a department admin of ${p.department.name} for a role.`}>
+                      {p.name}
+                      <span className="kb-badge">No access</span>
+                    </span>
+                  )}
                 </div>
               </td>
               <td className="kb-table__truncate">{p.description}</td>
-              <td className="kb-table__truncate">
-                {p.department.name}
-                {p.access.project_roles.map((r) => (
-                  <span key={r} className="kb-badge">
-                    {PROJECT_ROLE_NAMES[r]}
-                  </span>
-                ))}
-              </td>
-              <td className="kb-table__truncate">{p.purpose}</td>
+              <td className="kb-table__truncate">{p.department.name}</td>
               <td title={new Date(p.updated_at).toLocaleString()}>{timeAgo(p.updated_at)}</td>
               <td className="kb-table__actions">
                 {p.access.manage && (

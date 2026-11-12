@@ -4,18 +4,18 @@ import { FolderIcon } from "../components/Icons";
 import { Sidebar, type NavItem } from "../components/Sidebar";
 import { isSystemAdmin } from "../lib/token";
 import { AdminPage } from "../pages/AdminPage";
-import { ProjectDetailPage } from "../pages/projects/ProjectDetailPage";
-import { ProjectsPage } from "../pages/projects/ProjectsPage";
+import { DocRepoDetailPage } from "../pages/doc-repos/DocRepoDetailPage";
+import { DocReposPage } from "../pages/doc-repos/DocReposPage";
 import "../styles/shell.css";
 
 const COLLAPSED_KEY = "dh.sidebarCollapsed";
 
-/** Navigation entries. Projects (document & metadata management) is the landing page. */
-const NAV_ITEMS: NavItem[] = [{ key: "projects", label: "Projects", icon: <FolderIcon /> }];
+/** Navigation entries. Doc-repos (document & metadata management) is the landing page. */
+const NAV_ITEMS: NavItem[] = [{ key: "docRepos", label: "Document repositories", icon: <FolderIcon /> }];
 
-/** The open project, from a "#project/<id>" URL (so back/forward and bookmarks work). */
-function projectFromHash(): number | null {
-  const m = window.location.hash.match(/^#project\/(\d+)$/);
+/** The open doc-repo, from a "#doc-repo/<id>" URL (so back/forward and bookmarks work). */
+function docRepoFromHash(): number | null {
+  const m = window.location.hash.match(/^#doc-repo\/(\d+)$/);
   return m ? Number(m[1]) : null;
 }
 
@@ -37,28 +37,28 @@ interface Props {
 
 /** The signed-in app: navigation panel on the left, the current page on the right. */
 export function AppShell({ token, user, onSignOut, onSessionEnded }: Props) {
-  const [active, setActive] = useState("projects");
-  const [projectId, setProjectId] = useState(projectFromHash);
+  const [active, setActive] = useState("docRepos");
+  const [docRepoId, setDocRepoId] = useState(docRepoFromHash);
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const systemAdmin = isSystemAdmin(token);
 
   useEffect(() => {
     const onHash = () => {
-      const id = projectFromHash();
-      setProjectId(id);
-      if (id !== null) setActive("projects");
+      const id = docRepoFromHash();
+      setDocRepoId(id);
+      if (id !== null) setActive("docRepos");
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  function closeProject() {
+  function closeDocRepo() {
     history.pushState(null, "", window.location.pathname + window.location.search);
-    setProjectId(null);
+    setDocRepoId(null);
   }
 
   function navigate(key: string) {
-    if (projectId !== null) closeProject();
+    if (docRepoId !== null) closeDocRepo();
     setActive(key);
   }
 
@@ -76,13 +76,13 @@ export function AppShell({ token, user, onSignOut, onSessionEnded }: Props) {
   let page;
   if (active === "admin" && systemAdmin) {
     page = <AdminPage token={token} user={user} onSessionEnded={onSessionEnded} />;
-  } else if (projectId !== null) {
+  } else if (docRepoId !== null) {
     page = (
-      <ProjectDetailPage key={projectId} token={token} projectId={projectId} onBack={closeProject}
+      <DocRepoDetailPage key={docRepoId} token={token} docRepoId={docRepoId} onBack={closeDocRepo}
         onSessionEnded={onSessionEnded} />
     );
   } else {
-    page = <ProjectsPage token={token} onSessionEnded={onSessionEnded} />;
+    page = <DocReposPage token={token} onSessionEnded={onSessionEnded} />;
   }
 
   return (
@@ -90,7 +90,7 @@ export function AppShell({ token, user, onSignOut, onSessionEnded }: Props) {
       <Sidebar
         user={user}
         items={NAV_ITEMS}
-        active={active === "admin" ? "admin" : "projects"}
+        active={active === "admin" ? "admin" : "docRepos"}
         collapsed={collapsed}
         onToggle={toggle}
         onNavigate={navigate}

@@ -1,6 +1,6 @@
-/* Document & metadata management: project pages. Builds on knowledge-bases.css, kb-detail.css, admin.css. */
+/* Document & metadata management: doc-repo pages. Builds on knowledge-bases.css, kb-detail.css, admin.css. */
 
-/* Base metadata on the Metadata tab. */
+/* Department metadata on the Metadata tab. */
 .meta-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -34,7 +34,7 @@
   margin-right: var(--sp-2);
 }
 
-/* Project form: the "Base metadata" heading inside the grid. */
+/* Doc-repo form: the "Department metadata" heading inside the grid. */
 .form-section {
   display: flex;
   flex-direction: column;
@@ -110,23 +110,7 @@
   height: 14px;
 }
 
-.bulk-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  margin-bottom: var(--sp-4);
-  padding: var(--sp-2) var(--sp-4);
-  border: 1px solid var(--brand-red);
-  border-radius: var(--radius);
-  background: var(--brand-red-050);
-  font-size: var(--fs-sm);
-}
 
-.bulk-bar__count {
-  margin-right: auto;
-  font-weight: 700;
-  color: var(--brand-red-600);
-}
 
 .crumbs {
   display: flex;
@@ -169,16 +153,7 @@
   cursor: default;
 }
 
-.docs-table input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--brand-red);
-  cursor: pointer;
-}
 
-.docs-table tbody tr[aria-selected="true"] {
-  background: var(--brand-red-050);
-}
 
 .doc-name--button {
   width: 100%;
@@ -265,15 +240,6 @@
   color: var(--text-muted);
 }
 
-.meta-section__warn {
-  margin: var(--sp-3) 0 0;
-  font-size: var(--fs-xs);
-  color: #8a5300;
-}
-
-.meta-section--muted .meta-section__title {
-  color: var(--text-secondary);
-}
 
 .tag {
   margin-left: var(--sp-2);
@@ -285,9 +251,6 @@
   color: #8a5300;
 }
 
-.required {
-  color: var(--danger);
-}
 
 .extra-row {
   display: grid;
@@ -324,18 +287,26 @@
 
 .fields-edit__row {
   display: grid;
-  grid-template-columns: 2fr 1fr 2fr auto 32px;
+  grid-template-columns: 1fr 2fr 32px;
   align-items: end;
   gap: var(--sp-3);
-}
-
-.fields-edit__required {
-  height: 40px;
-  font-size: var(--fs-sm);
 }
 
 .fields-edit__actions {
   display: flex;
   justify-content: flex-end;
   gap: var(--sp-3);
+}
+
+/* Listed for everyone (PUBLIC), but the caller can't open it. */
+.kb-card__name--locked,
+.kb-table__locked {
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.kb-table__locked {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
 }

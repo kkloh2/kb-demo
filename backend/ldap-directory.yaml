@@ -7,7 +7,7 @@
 # Edits take effect at the next sign-in; no restart needed.
 #
 # The directory only says who someone is. What they may do in Data Hub (system roles, department
-# roles, project roles) is given in Data Hub itself: Administration -> Users, or a project's
+# roles, doc-repo roles) is given in Data Hub itself: Administration -> Users, or a doc-repo's
 # Members tab. The "intended role" comments below are the demo set-up each user is meant for.
 #
 # Passwords: admin123 (admin), datahub123 (analyst), demo123 (everyone else).
@@ -29,7 +29,7 @@ users:
     title: IT Administrator
 
   # ---------------------------------------------------------------- Risk Management (RISK)
-  risk.admin:  # intended role: RISK department admin (creates RISK projects, gives project roles)
+  risk.admin:  # intended role: RISK department admin (creates RISK doc-repos, gives doc-repo roles)
     password: demo123
     display_name: Rita Lim
     email: rita.lim@datahub.local
@@ -50,7 +50,7 @@ users:
     department: Risk Management
     title: Credit Risk Manager
 
-  risk.viewer:  # intended role: RISK viewer (sees RISK's project list)
+  risk.viewer:  # intended role: RISK viewer (sees RISK's doc-repo list)
     password: demo123
     display_name: Victor Ng
     email: victor.ng@datahub.local
@@ -94,7 +94,7 @@ users:
     title: HR Associate
 
   # ---------------------------------------------------------------- Operations (no Data Hub department yet)
-  ops.analyst:  # intended role: none by default; for testing access to another department's project
+  ops.analyst:  # intended role: none by default; for testing access to another department's doc-repo
     password: demo123
     display_name: Omar Ismail
     email: omar.ismail@datahub.local

@@ -2,33 +2,33 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ApiError } from "../../api/http";
 import {
   listMembers,
-  PROJECT_ROLE_NAMES,
-  PROJECT_ROLES,
+  DOC_REPO_ROLE_NAMES,
+  DOC_REPO_ROLES,
   removeMember,
   setMemberRoles,
   type Member,
-  type Project,
-  type ProjectRole,
-} from "../../api/projects";
+  type DocRepo,
+  type DocRepoRole,
+} from "../../api/doc-repos";
 import { PlusIcon } from "../../components/Icons";
 import { Modal } from "../../components/Modal";
 import { ConfirmDelete, ErrorMessage, Notice, useErrors } from "../admin/common";
 
-const ROLE_HELP: Record<ProjectRole, string> = {
+const ROLE_HELP: Record<DocRepoRole, string> = {
   MAKER: "Uploads documents and fills in their metadata",
   CHECKER: "Approves or rejects what makers submit",
-  VIEWER: "Sees the project's approved documents",
+  VIEWER: "Sees the repository's approved documents",
 };
-const EXCLUSIVE: Partial<Record<ProjectRole, ProjectRole>> = { MAKER: "CHECKER", CHECKER: "MAKER" };
+const EXCLUSIVE: Partial<Record<DocRepoRole, DocRepoRole>> = { MAKER: "CHECKER", CHECKER: "MAKER" };
 
 interface Props {
   token: string;
-  project: Project;
+  docRepo: DocRepo;
   onSessionEnded: (message: string) => void;
 }
 
-/** Department admins: who holds which role in this project. Changes take effect immediately. */
-export function MembersTab({ token, project, onSessionEnded }: Props) {
+/** Department admins: who holds which role in this doc-repo. Changes take effect immediately. */
+export function MembersTab({ token, docRepo, onSessionEnded }: Props) {
   const [members, setMembers] = useState<Member[] | null>(null);
   const [editing, setEditing] = useState<{ member: Member | null } | null>(null);
   const [removing, setRemoving] = useState<Member | null>(null);
@@ -36,8 +36,8 @@ export function MembersTab({ token, project, onSessionEnded }: Props) {
   const { error, fail } = useErrors(onSessionEnded);
 
   const load = useCallback(() => {
-    listMembers(token, project.id).then(setMembers).catch(fail);
-  }, [token, project.id, fail]);
+    listMembers(token, docRepo.id).then(setMembers).catch(fail);
+  }, [token, docRepo.id, fail]);
   useEffect(load, [load]);
 
   return (
@@ -49,7 +49,7 @@ export function MembersTab({ token, project, onSessionEnded }: Props) {
           </h2>
           <p className="panel__desc">
             Makers upload, checkers approve or reject, viewers see approved documents. Department admins of{" "}
-            {project.department.name} see every project's documents without being listed here.
+            {docRepo.department.name} see every repository's documents without being listed here.
           </p>
         </div>
         <button type="button" className="btn-primary" onClick={() => setEditing({ member: null })}>
@@ -65,7 +65,7 @@ export function MembersTab({ token, project, onSessionEnded }: Props) {
       ) : members === null ? (
         <p className="admin-message">Loading members…</p>
       ) : members.length === 0 ? (
-        <p className="admin-message">No members yet. Use Add member to give someone a role in this project.</p>
+        <p className="admin-message">No members yet. Use Add member to give someone a role in this repository.</p>
       ) : (
         <table className="data-table">
           <colgroup>
@@ -78,7 +78,7 @@ export function MembersTab({ token, project, onSessionEnded }: Props) {
             <tr>
               <th scope="col">Name</th>
               <th scope="col">Email</th>
-              <th scope="col">Project roles</th>
+              <th scope="col">Repository roles</th>
               <th scope="col">
                 <span className="visually-hidden">Actions</span>
               </th>
@@ -100,7 +100,7 @@ export function MembersTab({ token, project, onSessionEnded }: Props) {
                 <td>
                   {m.roles.map((r) => (
                     <span key={r} className="badge">
-                      {PROJECT_ROLE_NAMES[r]}
+                      {DOC_REPO_ROLE_NAMES[r]}
                     </span>
                   ))}
                 </td>
@@ -126,13 +126,13 @@ export function MembersTab({ token, project, onSessionEnded }: Props) {
         {editing && (
           <MemberForm
             token={token}
-            projectId={project.id}
+            docRepoId={docRepo.id}
             existing={editing.member}
             onCancel={() => setEditing(null)}
             onSaved={(m) => {
               setEditing(null);
               setNotice(m.roles.length
-                ? `${m.display_name} is now ${m.roles.map((r) => PROJECT_ROLE_NAMES[r].toLowerCase()).join(" and ")} here.`
+                ? `${m.display_name} is now ${m.roles.map((r) => DOC_REPO_ROLE_NAMES[r].toLowerCase()).join(" and ")} here.`
                 : `Removed ${m.display_name}.`);
               load();
             }}
@@ -144,12 +144,12 @@ export function MembersTab({ token, project, onSessionEnded }: Props) {
       <Modal open={removing !== null} title="Remove member" onClose={() => setRemoving(null)}>
         {removing && (
           <ConfirmDelete
-            message={<>Remove <strong>{removing.display_name}</strong> ({removing.lan_id}) from {project.name}? They lose
+            message={<>Remove <strong>{removing.display_name}</strong> ({removing.lan_id}) from {docRepo.name}? They lose
               access to its documents straight away.</>}
             confirmLabel="Remove member"
             onCancel={() => setRemoving(null)}
             onConfirm={async () => {
-              await removeMember(token, project.id, removing.lan_id);
+              await removeMember(token, docRepo.id, removing.lan_id);
               setRemoving(null);
               setNotice(`Removed ${removing.display_name}.`);
               load();
@@ -163,25 +163,25 @@ export function MembersTab({ token, project, onSessionEnded }: Props) {
 
 function MemberForm({
   token,
-  projectId,
+  docRepoId,
   existing,
   onCancel,
   onSaved,
   onSessionEnded,
 }: {
   token: string;
-  projectId: number;
+  docRepoId: number;
   existing: Member | null;
   onCancel: () => void;
   onSaved: (m: Member) => void;
   onSessionEnded: (message: string) => void;
 }) {
   const [lanId, setLanId] = useState(existing?.lan_id ?? "");
-  const [roles, setRoles] = useState<Set<ProjectRole>>(new Set(existing?.roles ?? ["VIEWER"]));
+  const [roles, setRoles] = useState<Set<DocRepoRole>>(new Set(existing?.roles ?? ["VIEWER"]));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  function toggle(role: ProjectRole) {
+  function toggle(role: DocRepoRole) {
     setRoles((current) => {
       const next = new Set(current);
       if (next.has(role)) next.delete(role);
@@ -199,7 +199,7 @@ function MemberForm({
     setError(null);
     setSaving(true);
     try {
-      onSaved(await setMemberRoles(token, projectId, lanId.trim(), PROJECT_ROLES.filter((r) => roles.has(r))));
+      onSaved(await setMemberRoles(token, docRepoId, lanId.trim(), DOC_REPO_ROLES.filter((r) => roles.has(r))));
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) onSessionEnded(err.message);
       else setError(err instanceof Error ? err.message : "Couldn't save the member.");
@@ -223,19 +223,19 @@ function MemberForm({
             {!existing && <small>They need to have signed in to Data Hub once, or been added by a system admin.</small>}
           </label>
           <fieldset className="form-field form-field--wide role-group">
-            <legend>Project roles</legend>
+            <legend>Repository roles</legend>
             <div className="role-options">
-              {PROJECT_ROLES.map((r) => (
+              {DOC_REPO_ROLES.map((r) => (
                 <label key={r} className="check check--block">
                   <input type="checkbox" checked={roles.has(r)} onChange={() => toggle(r)} />
                   <span>
-                    <strong>{PROJECT_ROLE_NAMES[r]}</strong>
+                    <strong>{DOC_REPO_ROLE_NAMES[r]}</strong>
                     <small>{ROLE_HELP[r]}</small>
                   </span>
                 </label>
               ))}
             </div>
-            <small>Maker and checker can't both be held in one project.</small>
+            <small>Maker and checker can't both be held in one repository.</small>
           </fieldset>
         </div>
       </div>

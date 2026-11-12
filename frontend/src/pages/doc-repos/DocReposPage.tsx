@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError } from "../../api/http";
-import { deleteProject, listProjects, PROJECT_ROLE_NAMES, type Project } from "../../api/projects";
+import { deleteDocRepo, listDocRepos, type DocRepo } from "../../api/doc-repos";
 import {
   EditIcon,
   FolderIcon,
@@ -16,14 +16,14 @@ import { Modal } from "../../components/Modal";
 import { tokenClaims } from "../../lib/token";
 import { timeAgo } from "../../lib/time";
 import { ConfirmDelete } from "../admin/common";
-import { ProjectForm } from "./ProjectForm";
-import { ProjectTable } from "./ProjectTable";
+import { DocRepoForm } from "./DocRepoForm";
+import { DocRepoTable } from "./DocRepoTable";
 import "../../styles/knowledge-bases.css";
 import "../../styles/admin.css"; // modal and form styles
 import "../../styles/kb-detail.css"; // menu styles
 
 type View = "grid" | "list";
-const VIEW_KEY = "dh.projectView";
+const VIEW_KEY = "dh.docRepoView";
 
 function readView(): View {
   try {
@@ -38,26 +38,26 @@ interface Props {
   onSessionEnded: (message: string) => void;
 }
 
-/** Landing page: the projects of the caller's departments, and any project they hold a role in. */
-export function ProjectsPage({ token, onSessionEnded }: Props) {
-  const [items, setItems] = useState<Project[] | null>(null);
+/** Landing page: the doc-repos of the caller's departments, and any doc-repo they hold a role in. */
+export function DocReposPage({ token, onSessionEnded }: Props) {
+  const [items, setItems] = useState<DocRepo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [view, setView] = useState<View>(readView);
-  const [editing, setEditing] = useState<{ project: Project | null } | null>(null);
-  const [deleting, setDeleting] = useState<Project | null>(null);
+  const [editing, setEditing] = useState<{ docRepo: DocRepo | null } | null>(null);
+  const [deleting, setDeleting] = useState<DocRepo | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // Department admins can create projects: from the token, for the button only.
+  // Department admins can create doc-repos: from the token, for the button only.
   const orgRoles = tokenClaims(token).org_unit_roles ?? {};
   const canCreate = Object.values(orgRoles).some((roles) => roles.includes("DEPARTMENT_ADMIN"));
 
   const load = useCallback(() => {
-    listProjects(token)
+    listDocRepos(token)
       .then(setItems)
       .catch((e: unknown) => {
         if (e instanceof ApiError && e.status === 401) onSessionEnded(e.message);
-        else setError(e instanceof Error ? e.message : "Couldn't load projects.");
+        else setError(e instanceof Error ? e.message : "Couldn't load document repositories.");
       });
   }, [token, onSessionEnded]);
   useEffect(load, [load]);
@@ -66,7 +66,7 @@ export function ProjectsPage({ token, onSessionEnded }: Props) {
     const q = query.trim().toLowerCase();
     if (!items || !q) return items ?? [];
     return items.filter((p) =>
-      [p.name, p.description, p.department.name, p.department.code, p.purpose, p.business_unit, p.country]
+      [p.name, p.description, p.department.name, p.department.code, ...Object.values(p.department_metadata)]
         .some((v) => v.toLowerCase().includes(q)),
     );
   }, [items, query]);
@@ -75,9 +75,9 @@ export function ProjectsPage({ token, onSessionEnded }: Props) {
     if (!items) return null;
     const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
     return {
-      total: items.length,
+      documents: items.reduce((n, p) => n + p.document_count, 0),
+      repositories: items.length,
       departments: new Set(items.map((p) => p.department.code)).size,
-      mine: items.filter((p) => p.access.project_roles.length > 0).length,
       recent: items.filter((p) => new Date(p.updated_at).getTime() >= weekAgo).length,
     };
   }, [items]);
@@ -91,23 +91,23 @@ export function ProjectsPage({ token, onSessionEnded }: Props) {
     }
   }
 
-  const menuItems = (p: Project): MenuItem[] =>
+  const menuItems = (p: DocRepo): MenuItem[] =>
     p.access.manage
       ? [
-          { label: "Edit", icon: <EditIcon />, onSelect: () => setEditing({ project: p }) },
+          { label: "Edit", icon: <EditIcon />, onSelect: () => setEditing({ docRepo: p }) },
           { label: "Delete", icon: <TrashIcon />, danger: true, onSelect: () => setDeleting(p) },
         ]
       : [];
 
   return (
     <div className="page">
-      <h1 className="page__title">Projects</h1>
+      <h1 className="page__title">Document repositories</h1>
 
       <ul className="stats" aria-label="Summary">
         {[
-          { label: "Projects", value: stats?.total },
+          { label: "Total documents", value: stats?.documents },
+          { label: "Repositories", value: stats?.repositories },
           { label: "Departments", value: stats?.departments },
-          { label: "With a role for me", value: stats?.mine },
           { label: "Updated this week", value: stats?.recent },
         ].map((s) => (
           <li key={s.label} className="stat">
@@ -117,15 +117,15 @@ export function ProjectsPage({ token, onSessionEnded }: Props) {
         ))}
       </ul>
 
-      <section aria-labelledby="all-projects">
+      <section aria-labelledby="all-docRepos">
         <div className="section-head">
-          <h2 id="all-projects" className="section-head__title">
-            All projects
+          <h2 id="all-docRepos" className="section-head__title">
+            All repositories
           </h2>
           {canCreate && (
-            <button type="button" className="btn-primary" onClick={() => setEditing({ project: null })}>
+            <button type="button" className="btn-primary" onClick={() => setEditing({ docRepo: null })}>
               <PlusIcon />
-              Create project
+              Create repository
             </button>
           )}
         </div>
@@ -141,10 +141,10 @@ export function ProjectsPage({ token, onSessionEnded }: Props) {
             <SearchIcon />
             <input
               type="search"
-              placeholder="Search projects"
+              placeholder="Search repositories"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              aria-label="Search projects"
+              aria-label="Search repositories"
             />
           </label>
 
@@ -165,14 +165,14 @@ export function ProjectsPage({ token, onSessionEnded }: Props) {
             {error}
           </p>
         ) : items === null ? (
-          <p className="kb-message">Loading projects…</p>
+          <p className="kb-message">Loading repositories…</p>
         ) : filtered.length === 0 ? (
           <p className="kb-message">
             {query
-              ? `No projects match “${query}”.`
+              ? `No repositories match “${query}”.`
               : canCreate
-                ? "No projects yet. Use Create project to add the first one."
-                : "No projects to show. Projects appear here once you're a viewer in a department, or a department admin gives you a role in one."}
+                ? "No repositories yet. Use Create repository to add the first one."
+                : "No repositories yet."}
           </p>
         ) : view === "grid" ? (
           <ul className="kb-grid">
@@ -182,9 +182,16 @@ export function ProjectsPage({ token, onSessionEnded }: Props) {
                   <span className="kb-card__icon">
                     <FolderIcon />
                   </span>
-                  <a className="kb-card__name" href={`#project/${p.id}`}>
-                    {p.name}
-                  </a>
+                  {p.access.view_details ? (
+                    <a className="kb-card__name" href={`#doc-repo/${p.id}`}>
+                      {p.name}
+                    </a>
+                  ) : (
+                    <span className="kb-card__name kb-card__name--locked" title={`Listed for everyone. To open it, ask a department admin of ${p.department.name} for a role.`}>
+                      {p.name}
+                    </span>
+                  )}
+                  {!p.access.view_details && <span className="kb-badge">No access</span>}
                   {p.access.manage && (
                     <div className="kb-card__actions">
                       <Menu
@@ -204,30 +211,25 @@ export function ProjectsPage({ token, onSessionEnded }: Props) {
                   <span className="kb-card__updated">Updated {timeAgo(p.updated_at)}</span>
                   <span className="kb-card__dept" title={p.department.name}>
                     <span className="kb-card__dept-name">{p.department.name}</span>
-                    {p.access.project_roles.map((r) => (
-                      <span key={r} className="kb-badge">
-                        {PROJECT_ROLE_NAMES[r]}
-                      </span>
-                    ))}
                   </span>
                 </div>
               </li>
             ))}
           </ul>
         ) : (
-          <ProjectTable items={filtered} menuItems={menuItems} />
+          <DocRepoTable items={filtered} menuItems={menuItems} />
         )}
       </section>
 
       <Modal
         open={editing !== null}
-        title={editing?.project ? `Edit ${editing.project.name}` : "Create project"}
+        title={editing?.docRepo ? `Edit ${editing.docRepo.name}` : "Create repository"}
         onClose={() => setEditing(null)}
       >
         {editing && (
-          <ProjectForm
+          <DocRepoForm
             token={token}
-            existing={editing.project}
+            existing={editing.docRepo}
             onCancel={() => setEditing(null)}
             onSaved={(p, created) => {
               setEditing(null);
@@ -241,14 +243,14 @@ export function ProjectsPage({ token, onSessionEnded }: Props) {
         )}
       </Modal>
 
-      <Modal open={deleting !== null} title="Delete project" onClose={() => setDeleting(null)}>
+      <Modal open={deleting !== null} title="Delete repository" onClose={() => setDeleting(null)}>
         {deleting && (
           <ConfirmDelete
             message={<>Delete <strong>{deleting.name}</strong> and its members? This can't be undone.</>}
-            confirmLabel="Delete project"
+            confirmLabel="Delete repository"
             onCancel={() => setDeleting(null)}
             onConfirm={async () => {
-              await deleteProject(token, deleting.id);
+              await deleteDocRepo(token, deleting.id);
               setDeleting(null);
               setNotice(`Deleted ${deleting.name}.`);
               load();

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  BASE_LABELS,
   downloadDocument,
   formatSize,
   getDocument,
@@ -8,34 +7,32 @@ import {
   STATUS_LABEL,
   submitDocuments,
   updateMetadata,
-  type BaseMetadata,
-  type FieldDef,
-  type ProjectDocument,
+  type MetadataPair,
+  type DocRepoDocument,
 } from "../../api/documents";
+import { DEPARTMENT_METADATA_KEYS, DEPARTMENT_METADATA_LABELS, type DepartmentMetadata } from "../../api/doc-repos";
 import { ApiError } from "../../api/http";
 import { CheckIcon, DownloadIcon, PlusIcon, TrashIcon, UploadIcon } from "../../components/Icons";
 
-const BASE_KEYS = Object.keys(BASE_LABELS) as (keyof BaseMetadata)[];
-
 interface Props {
   token: string;
-  projectId: number;
+  docRepoId: number;
   documentId: number;
-  fields: FieldDef[];
-  projectBase: BaseMetadata;
+  repoPairs: MetadataPair[]; // the doc-repo's repository metadata
+  repoDefaults: DepartmentMetadata; // the doc-repo's department metadata
   onClose: () => void;
   onChanged: (message?: string) => void;
   onSessionEnded: (message: string) => void;
 }
 
 /**
- * One document: its file details and its metadata in three parts: base (from the project, which
- * the maker may override), the project's fields, and the maker's own fields. AI metadata is phase 2.
+ * One document: its file details and its metadata in three parts: department metadata (from the doc-repo, which
+ * the maker may override), repository metadata (likewise), and the maker's own fields.
  * Makers edit drafts and rejected documents and submit them; checkers approve or reject pending ones.
  */
-export function DocumentPanel({ token, projectId, documentId, fields, projectBase, onClose, onChanged, onSessionEnded }: Props) {
-  const [doc, setDoc] = useState<ProjectDocument | null>(null);
-  const [base, setBase] = useState<BaseMetadata>(projectBase);
+export function DocumentPanel({ token, docRepoId, documentId, repoPairs, repoDefaults, onClose, onChanged, onSessionEnded }: Props) {
+  const [doc, setDoc] = useState<DocRepoDocument | null>(null);
+  const [dept, setDept] = useState<DepartmentMetadata>(repoDefaults);
   const [values, setValues] = useState<Record<string, string>>({});
   const [extra, setExtra] = useState<{ key: string; value: string }[]>([]);
   const [reason, setReason] = useState("");
@@ -51,16 +48,16 @@ export function DocumentPanel({ token, projectId, documentId, fields, projectBas
     [onSessionEnded],
   );
 
-  const show = useCallback((d: ProjectDocument) => {
+  const show = useCallback((d: DocRepoDocument) => {
     setDoc(d);
-    setBase(d.base);
-    setValues(d.fields);
+    setDept(d.department_metadata);
+    setValues(d.repository_metadata);
     setExtra(Object.entries(d.extra).map(([key, value]) => ({ key, value })));
   }, []);
 
   useEffect(() => {
-    getDocument(token, projectId, documentId).then(show).catch(fail);
-  }, [token, projectId, documentId, show, fail]);
+    getDocument(token, docRepoId, documentId).then(show).catch(fail);
+  }, [token, docRepoId, documentId, show, fail]);
 
   if (!doc) {
     return <div className="modal__body">{error ? <p className="alert" role="alert">{error}</p> : <p className="muted">Loading…</p>}</div>;
@@ -68,8 +65,8 @@ export function DocumentPanel({ token, projectId, documentId, fields, projectBas
 
   const editable = doc.actions.edit;
   const payload = () => ({
-    base,
-    fields: Object.fromEntries(Object.entries(values).filter(([, v]) => v.trim())),
+    department_metadata: dept,
+    repository_metadata: Object.fromEntries(repoPairs.map((p) => [p.key, (values[p.key] ?? "").trim()])),
     extra: Object.fromEntries(extra.filter((e) => e.key.trim() && e.value.trim()).map((e) => [e.key.trim(), e.value.trim()])),
   });
 
@@ -88,16 +85,16 @@ export function DocumentPanel({ token, projectId, documentId, fields, projectBas
 
   const save = () =>
     act("save", async () => {
-      show(await updateMetadata(token, projectId, doc.id, payload()));
+      show(await updateMetadata(token, docRepoId, doc.id, payload()));
       return `Saved metadata for ${doc.filename}.`;
     });
 
   const saveAndSubmit = () =>
     act("submit", async () => {
-      await updateMetadata(token, projectId, doc.id, payload());
-      const r = await submitDocuments(token, projectId, [doc.id]);
+      await updateMetadata(token, docRepoId, doc.id, payload());
+      const r = await submitDocuments(token, docRepoId, [doc.id]);
       if (r.skipped.length) {
-        show(await getDocument(token, projectId, doc.id));
+        show(await getDocument(token, docRepoId, doc.id));
         throw new Error(r.skipped[0].reason);
       }
       onClose();
@@ -106,15 +103,13 @@ export function DocumentPanel({ token, projectId, documentId, fields, projectBas
 
   const decide = (decision: "approve" | "reject") =>
     act(decision, async () => {
-      const r = await reviewDocuments(token, projectId, [doc.id], decision, reason);
+      const r = await reviewDocuments(token, docRepoId, [doc.id], decision, reason);
       if (r.skipped.length) throw new Error(r.skipped[0].reason);
       onClose();
       return `${decision === "approve" ? "Approved" : "Rejected"} ${doc.filename}.`;
     });
 
-  const sameAsProject = (k: keyof BaseMetadata) => (base[k] ?? "") === (projectBase[k] ?? "");
-  // Required fields still empty in the form (not just at the last save).
-  const missing = fields.filter((f) => f.required && !(values[f.key] ?? "").trim()).map((f) => f.label);
+  const sameAsDocRepo = (k: keyof DepartmentMetadata) => (dept[k] ?? "") === (repoDefaults[k] ?? "");
 
   return (
     <>
@@ -157,62 +152,59 @@ export function DocumentPanel({ token, projectId, documentId, fields, projectBas
           </p>
         )}
 
-        {/* ---------------------------------------------------------------- base */}
+        {/* ---------------------------------------------------------------- department */}
         <section className="meta-section">
-          <h4 className="meta-section__title">Base metadata</h4>
-          <p className="meta-section__desc">From the project. {editable ? "Change a value to override it for this document." : ""}</p>
+          <h4 className="meta-section__title">Department metadata</h4>
+          <p className="meta-section__desc">Set by the department admin for every document in this repository.{" "}
+            {editable ? "Change a value to override it for this document." : ""}</p>
           <div className="form-grid">
-            {BASE_KEYS.map((k) => (
+            {DEPARTMENT_METADATA_KEYS.map((k) => (
               <label key={k} className="form-field">
                 <span>
-                  {BASE_LABELS[k]}
-                  {!sameAsProject(k) && <span className="tag">Overridden</span>}
+                  {DEPARTMENT_METADATA_LABELS[k]}
+                  {!sameAsDocRepo(k) && <span className="tag">Overridden</span>}
                 </span>
                 <input
-                  type={k === "valid_till" ? "date" : "text"}
-                  value={base[k] ?? ""}
+                  type="text"
+                  value={dept[k] ?? ""}
                   readOnly={!editable}
-                  onChange={(e) => setBase((b) => ({ ...b, [k]: k === "valid_till" ? e.target.value || null : e.target.value }))}
+                  onChange={(e) => setDept((d) => ({ ...d, [k]: e.target.value }))}
                 />
-                {!sameAsProject(k) && <small>Project: {projectBase[k] || "not set"}</small>}
+                {!sameAsDocRepo(k) && <small>Repository: {repoDefaults[k] || "not set"}</small>}
               </label>
             ))}
           </div>
         </section>
 
-        {/* ---------------------------------------------------------------- project fields */}
+        {/* ---------------------------------------------------------------- repository */}
         <section className="meta-section">
-          <h4 className="meta-section__title">Project fields</h4>
-          {fields.length === 0 ? (
-            <p className="meta-section__desc">This project has no fields of its own yet.</p>
+          <h4 className="meta-section__title">Repository metadata</h4>
+          {repoPairs.length === 0 ? (
+            <p className="meta-section__desc">This repository has no metadata of its own yet.</p>
           ) : (
-            <div className="form-grid">
-              {fields.map((f) => (
-                <label key={f.key} className="form-field">
-                  <span>
-                    {f.label}
-                    {f.required && <span className="required" aria-label="required"> *</span>}
-                  </span>
-                  {f.type === "select" ? (
-                    <select value={values[f.key] ?? ""} disabled={!editable}
-                      onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}>
-                      <option value="">—</option>
-                      {f.options.map((o) => (
-                        <option key={o} value={o}>
-                          {o}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input type={f.type === "date" ? "date" : "text"} value={values[f.key] ?? ""} readOnly={!editable}
-                      onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))} />
-                  )}
-                </label>
-              ))}
-            </div>
-          )}
-          {missing.length > 0 && editable && (
-            <p className="meta-section__warn">Fill in {missing.join(", ")} before submitting.</p>
+            <>
+              <p className="meta-section__desc">
+                Set by the department admin for this repository.{" "}
+                {editable ? "Change a value to override it for this document." : ""}
+              </p>
+              <div className="form-grid">
+                {repoPairs.map((p) => {
+                  const value = values[p.key] ?? "";
+                  const overridden = value !== p.value;
+                  return (
+                    <label key={p.key} className="form-field">
+                      <span>
+                        {p.key}
+                        {overridden && <span className="tag">Overridden</span>}
+                      </span>
+                      <input value={value} readOnly={!editable}
+                        onChange={(e) => setValues((v) => ({ ...v, [p.key]: e.target.value }))} />
+                      {overridden && <small>Repository: {p.value || "not set"}</small>}
+                    </label>
+                  );
+                })}
+              </div>
+            </>
           )}
         </section>
 
@@ -240,14 +232,6 @@ export function DocumentPanel({ token, projectId, documentId, fields, projectBas
               <PlusIcon /> Add a field
             </button>
           )}
-        </section>
-
-        {/* ---------------------------------------------------------------- AI */}
-        <section className="meta-section meta-section--muted">
-          <h4 className="meta-section__title">AI-generated metadata</h4>
-          <p className="meta-section__desc">
-            Coming in phase 2: extracted from the file automatically, in the background.
-          </p>
         </section>
 
         {doc.actions.review && rejecting && (

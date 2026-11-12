@@ -1,6 +1,6 @@
-from datetime import date, datetime
+from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DepartmentRef(BaseModel):
@@ -8,40 +8,54 @@ class DepartmentRef(BaseModel):
     name: str
 
 
-class ProjectIn(BaseModel):
-    """Create (POST) or replace (PUT) a project: name, description and base metadata."""
+class DepartmentMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # only these keys
+
+    department: str = Field(default="", max_length=128)
+    business_unit: str = Field(default="", max_length=128, description='e.g. "Consumer Banking"')
+    country: str = Field(default="", max_length=64, description='e.g. "Singapore"')
+
+
+class MetadataPair(BaseModel):
+    """One repository metadata entry: plain text key and value."""
+
+    key: str = Field(min_length=1, max_length=64, description='e.g. "Product code"')
+    value: str = Field(default="", max_length=512, description='e.g. "VISA-PLAT"')
+
+
+class DocRepoIn(BaseModel):
+    """Create (POST) or replace (PUT) a doc-repo: name, description and department metadata."""
 
     name: str = Field(min_length=1, max_length=128)
     description: str = Field(default="", max_length=2000)
-    country: str = Field(default="", max_length=64, description='e.g. "Singapore"')
-    business_unit: str = Field(default="", max_length=128, description='e.g. "Consumer Banking"')
-    purpose: str = Field(default="", max_length=128, description='e.g. "Credit card", "Loan"')
-    valid_till: date | None = Field(default=None, description="Metadata only: approved documents stay viewable")
+    department_metadata: DepartmentMetadata = Field(
+        default_factory=DepartmentMetadata,
+        description="Copied onto each document. An empty department becomes the department's name.")
 
 
-class ProjectAccessOut(BaseModel):
-    """What the caller can do with the project, for the UI. The server checks again on each request."""
+class DocRepoAccessOut(BaseModel):
+    """What the caller can do with the doc-repo, for the UI. The server checks again on each request."""
 
-    manage: bool = Field(description="Edit or delete the project and manage its members (department admin)")
+    manage: bool = Field(description="Edit or delete the doc-repo and manage its members (department admin)")
+    view_details: bool = Field(description="Open its page: a doc-repo role, or department VIEWER / admin")
     view_documents: bool
-    upload: bool = Field(description="Project maker")
-    review: bool = Field(description="Project checker")
-    project_roles: list[str] = Field(description="The caller's roles in this project")
+    upload: bool = Field(description="Doc-repo maker")
+    review: bool = Field(description="Doc-repo checker")
+    doc_repo_roles: list[str] = Field(description="The caller's roles in this doc-repo")
 
 
-class ProjectOut(BaseModel):
+class DocRepoOut(BaseModel):
     id: int
     name: str
     description: str
     department: DepartmentRef
-    country: str
-    business_unit: str
-    purpose: str
-    valid_till: date | None
+    department_metadata: DepartmentMetadata
+    repository_metadata: list[MetadataPair]
     created_by: str | None = Field(description="Display name of whoever created it")
     created_at: datetime
     updated_at: datetime
-    access: ProjectAccessOut
+    document_count: int = Field(description="Documents in it that the caller may see")
+    access: DocRepoAccessOut
 
 
 class MemberRolesIn(BaseModel):
@@ -56,32 +70,12 @@ class MemberOut(BaseModel):
     roles: list[str]
 
 
-# --------------------------------------------------------------------------- metadata fields
-
-
-class FieldDef(BaseModel):
-    """A metadata field the project's documents fill in."""
-
-    key: str = Field(default="", max_length=64, description="Derived from the label when empty, e.g. product_code")
-    label: str = Field(min_length=1, max_length=128, description='e.g. "Product code"')
-    type: str = Field(default="text", description="text, date or select")
-    options: list[str] = Field(default_factory=list, description="For select fields")
-    required: bool = Field(default=False, description="Must be filled in before submitting")
-
-
 # --------------------------------------------------------------------------- documents
 
 
 class PersonRef(BaseModel):
     lan_id: str
     display_name: str
-
-
-class BaseMetadata(BaseModel):
-    country: str = ""
-    business_unit: str = ""
-    purpose: str = ""
-    valid_till: date | None = None
 
 
 class DocumentActionsOut(BaseModel):
@@ -93,8 +87,8 @@ class DocumentActionsOut(BaseModel):
 
 class DocumentOut(BaseModel):
     id: int
-    project_id: int
-    folder: str = Field(description='Path inside the project, e.g. "Policies/2026"; "" for the top level')
+    doc_repo_id: int
+    folder: str = Field(description='Path inside the doc-repo, e.g. "Policies/2026"; "" for the top level')
     filename: str
     content_type: str | None
     size_bytes: int
@@ -106,25 +100,25 @@ class DocumentOut(BaseModel):
     submitted_at: datetime | None
     decided_at: datetime | None
     rejection_reason: str | None
-    base: BaseMetadata
-    base_overrides: list[str] = Field(description="Base fields the maker changed from the project's values")
-    fields: dict[str, str] = Field(description="Values of the project's fields")
+    department_metadata: DepartmentMetadata
+    department_overrides: list[str] = Field(description="Department metadata keys the maker changed from the doc-repo's")
+    repository_metadata: dict[str, str] = Field(description="Values for the doc-repo's repository metadata keys")
+    repository_overrides: list[str] = Field(description="Repository metadata keys the maker changed from the doc-repo's")
     extra: dict[str, str] = Field(description="Fields the maker added")
     ai_metadata: dict = Field(description="Phase 2: extracted by an LLM")
-    missing_required: list[str] = Field(description="Labels of required fields not filled in yet")
     actions: DocumentActionsOut
 
 
 class DocumentList(BaseModel):
     documents: list[DocumentOut]
-    fields: list[FieldDef]
+    repository_metadata: list[MetadataPair] = Field(description="The doc-repo's current keys and values")
 
 
 class MetadataUpdate(BaseModel):
     """Replace the document's metadata."""
 
-    base: BaseMetadata
-    fields: dict[str, str] = Field(default_factory=dict)
+    department_metadata: DepartmentMetadata
+    repository_metadata: dict[str, str] = Field(default_factory=dict)
     extra: dict[str, str] = Field(default_factory=dict)
 
 

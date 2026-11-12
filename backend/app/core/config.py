@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     # LAN IDs made system admins at start-up when nobody holds SYSTEM_ADMIN (how the first one gets in).
     bootstrap_system_admins: list[str] = ["admin"]
 
-    # Document uploads (local disk for now). Files go under upload_dir/projects/<project id>/.
+    # Document uploads (local disk for now). Files go under upload_dir/doc-repos/<doc-repo id>/.
     upload_dir: Path = BACKEND_DIR / "data" / "uploads"
     max_upload_mb: int = 25  # per file
     max_files_per_upload: int = 200
