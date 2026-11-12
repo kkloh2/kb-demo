@@ -5,18 +5,98 @@
 #
 # Keys are LAN IDs (lower-case). Each user needs: password, display_name, email, department, title.
 # Edits take effect at the next sign-in; no restart needed.
+#
+# The directory only says who someone is. What they may do in Data Hub (system roles, department
+# roles, project roles) is given in Data Hub itself: Administration -> Users, or a project's
+# Members tab. The "intended role" comments below are the demo set-up each user is meant for.
+#
+# Passwords: admin123 (admin), datahub123 (analyst), demo123 (everyone else).
 
 users:
-  admin:
+  # ---------------------------------------------------------------- Technology
+  admin:  # intended role: system admin (seeded at start-up: bootstrap_system_admins)
     password: admin123
     display_name: Data Hub Admin
     email: admin@datahub.local
     department: Technology
     title: Platform Administrator
 
-  analyst:
+  it.admin:  # intended role: a second system admin (so one system admin can manage the other)
+    password: demo123
+    display_name: Ivan Teo
+    email: ivan.teo@datahub.local
+    department: Technology
+    title: IT Administrator
+
+  # ---------------------------------------------------------------- Risk Management (RISK)
+  risk.admin:  # intended role: RISK department admin (creates RISK projects, gives project roles)
+    password: demo123
+    display_name: Rita Lim
+    email: rita.lim@datahub.local
+    department: Risk Management
+    title: Head of Risk Policy
+
+  risk.maker:  # intended role: RISK maker (uploads documents)
+    password: demo123
+    display_name: Marcus Lee
+    email: marcus.lee@datahub.local
+    department: Risk Management
+    title: Credit Risk Analyst
+
+  risk.checker:  # intended role: RISK checker (approves or rejects)
+    password: demo123
+    display_name: Chloe Wong
+    email: chloe.wong@datahub.local
+    department: Risk Management
+    title: Credit Risk Manager
+
+  risk.viewer:  # intended role: RISK viewer (sees RISK's project list)
+    password: demo123
+    display_name: Victor Ng
+    email: victor.ng@datahub.local
+    department: Risk Management
+    title: Risk Associate
+
+  analyst:  # intended role: RISK viewer
     password: datahub123
     display_name: Alex Tan
     email: alex.tan@datahub.local
     department: Risk Management
     title: Data Analyst
+
+  # ---------------------------------------------------------------- Human Resources (HR)
+  hr.admin:  # intended role: HR department admin
+    password: demo123
+    display_name: Hari Kumar
+    email: hari.kumar@datahub.local
+    department: Human Resources
+    title: HR Business Partner Lead
+
+  hr.maker:  # intended role: HR maker
+    password: demo123
+    display_name: Mei Ling Chua
+    email: meiling.chua@datahub.local
+    department: Human Resources
+    title: HR Executive
+
+  hr.checker:  # intended role: HR checker
+    password: demo123
+    display_name: Daniel Ong
+    email: daniel.ong@datahub.local
+    department: Human Resources
+    title: HR Manager
+
+  hr.viewer:  # intended role: HR viewer
+    password: demo123
+    display_name: Priya Nair
+    email: priya.nair@datahub.local
+    department: Human Resources
+    title: HR Associate
+
+  # ---------------------------------------------------------------- Operations (no Data Hub department yet)
+  ops.analyst:  # intended role: none by default; for testing access to another department's project
+    password: demo123
+    display_name: Omar Ismail
+    email: omar.ismail@datahub.local
+    department: Operations
+    title: Operations Analyst
