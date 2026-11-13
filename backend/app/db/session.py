@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy import Engine, create_engine, event
+from sqlalchemy import Engine, create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
@@ -53,7 +53,7 @@ def get_db() -> Iterator[Session]:
 Db = Annotated[Session, Depends(get_db)]
 
 
-def _register_models() -> None:
+def register_models() -> None:
     """Import every feature's models so Base.metadata knows their tables."""
     import app.auth.models  # noqa: F401
     import app.users.models  # noqa: F401
@@ -78,9 +78,14 @@ def _seed(db: Session) -> None:
 
 
 def init_db() -> None:
-    """Create tables if missing, sync reference data, and add demo data."""
-    _register_models()
-    Base.metadata.create_all(get_engine())
+    """Bring the schema up to date (Alembic migrations), sync reference data, and add demo data."""
+    from app.db.migrations import require_head, upgrade_to_head
+
+    register_models()
+    if get_settings().auto_migrate:
+        upgrade_to_head(get_engine())
+    else:
+        require_head(get_engine())
     with new_session() as db:
         _reference_data(db)
         if get_settings().seed_demo_data:
@@ -89,10 +94,16 @@ def init_db() -> None:
 
 
 def reset_database() -> None:
-    """Drop everything and re-seed. Used by tests and `python -m app.db.reset`."""
-    _register_models()
-    Base.metadata.drop_all(get_engine())
-    Base.metadata.create_all(get_engine())
+    """Drop everything, rebuild it through the migrations, and re-seed. Used by tests and
+    `python -m app.db.reset`. Never in production."""
+    from app.db.migrations import upgrade_to_head
+
+    register_models()
+    engine = get_engine()
+    Base.metadata.drop_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE IF EXISTS alembic_version"))
+    upgrade_to_head(engine)
     with new_session() as db:
         _reference_data(db)
         _seed(db)

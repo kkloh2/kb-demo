@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     # Database (SQLite for the demo; any SQLAlchemy URL works)
     database_url: str = f"sqlite:///{BACKEND_DIR / 'data' / 'datahub.db'}"
     seed_demo_data: bool = True
+    # Bring the database up to the latest migration at start-up. In production, set it to false and
+    # run `alembic upgrade head` as a deployment step (after a backup); the app then refuses to start
+    # against a database that isn't up to date.
+    auto_migrate: bool = True
 
     # Tokens
     jwt_secret: str = DEV_JWT_SECRET

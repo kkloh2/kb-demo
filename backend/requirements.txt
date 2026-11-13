@@ -17,6 +17,7 @@ SQLAlchemy==2.1.8
 PyYAML==6.0.3
 ldap3==2.9.1
 python-multipart==0.0.33  # file uploads (documents)
+alembic==1.20.1           # database migrations (backend/migrations)
 
 # --- Tests (direct dependencies) ---------------------------------------------
 pytest==9.2.0
@@ -49,6 +50,9 @@ pyasn1==0.6.5
 # httpx2
 httpcore2==2.16.0
 truststore==0.10.5
+# alembic
+Mako==1.4.3
+MarkupSafe==3.0.4
 # pytest
 iniconfig==2.3.1
 packaging==26.3
