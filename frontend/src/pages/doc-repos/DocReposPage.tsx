@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { canCreateRepos, type MyAccess } from "../../api/access";
 import { ApiError } from "../../api/http";
 import { deleteDocRepo, listDocRepos, type DocRepo } from "../../api/doc-repos";
 import {
@@ -13,7 +14,6 @@ import {
 } from "../../components/Icons";
 import { Menu, type MenuItem } from "../../components/Menu";
 import { Modal } from "../../components/Modal";
-import { tokenClaims } from "../../lib/token";
 import { timeAgo } from "../../lib/time";
 import { ConfirmDelete } from "../admin/common";
 import { DocRepoForm } from "./DocRepoForm";
@@ -21,6 +21,7 @@ import { DocRepoTable } from "./DocRepoTable";
 import "../../styles/knowledge-bases.css";
 import "../../styles/admin.css"; // modal and form styles
 import "../../styles/kb-detail.css"; // menu styles
+import { MessageBar } from "../../components/MessageBar";
 
 type View = "grid" | "list";
 const VIEW_KEY = "dh.docRepoView";
@@ -35,11 +36,12 @@ function readView(): View {
 
 interface Props {
   token: string;
+  access: MyAccess;
   onSessionEnded: (message: string) => void;
 }
 
-/** Landing page: the doc-repos of the caller's departments, and any doc-repo they hold a role in. */
-export function DocReposPage({ token, onSessionEnded }: Props) {
+/** Landing page: every repository; the ones the caller holds a role in can be opened. */
+export function DocReposPage({ token, access, onSessionEnded }: Props) {
   const [items, setItems] = useState<DocRepo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -48,9 +50,8 @@ export function DocReposPage({ token, onSessionEnded }: Props) {
   const [deleting, setDeleting] = useState<DocRepo | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // Department admins can create doc-repos: from the token, for the button only.
-  const orgRoles = tokenClaims(token).org_unit_roles ?? {};
-  const canCreate = Object.values(orgRoles).some((roles) => roles.includes("DEPARTMENT_ADMIN"));
+  // Doc Hub admins create repositories (for the button only; the server checks).
+  const canCreate = canCreateRepos(access);
 
   const load = useCallback(() => {
     listDocRepos(token)
@@ -66,7 +67,7 @@ export function DocReposPage({ token, onSessionEnded }: Props) {
     const q = query.trim().toLowerCase();
     if (!items || !q) return items ?? [];
     return items.filter((p) =>
-      [p.name, p.description, p.department.name, p.department.code, ...Object.values(p.department_metadata)]
+      [p.name, p.description, p.created_by?.display_name ?? "", ...p.metadata.map((m) => m.value)]
         .some((v) => v.toLowerCase().includes(q)),
     );
   }, [items, query]);
@@ -77,7 +78,7 @@ export function DocReposPage({ token, onSessionEnded }: Props) {
     return {
       documents: items.reduce((n, p) => n + p.document_count, 0),
       repositories: items.length,
-      departments: new Set(items.map((p) => p.department.code)).size,
+      mine: items.filter((p) => p.access.roles.length > 0).length,
       recent: items.filter((p) => new Date(p.updated_at).getTime() >= weekAgo).length,
     };
   }, [items]);
@@ -92,12 +93,12 @@ export function DocReposPage({ token, onSessionEnded }: Props) {
   }
 
   const menuItems = (p: DocRepo): MenuItem[] =>
-    p.access.manage
-      ? [
-          { label: "Edit", icon: <EditIcon />, onSelect: () => setEditing({ docRepo: p }) },
-          { label: "Delete", icon: <TrashIcon />, danger: true, onSelect: () => setDeleting(p) },
-        ]
-      : [];
+    [
+      ...(p.access.edit ? [{ label: "Edit", icon: <EditIcon />, onSelect: () => setEditing({ docRepo: p }) }] : []),
+      ...(p.access.delete
+        ? [{ label: "Delete", icon: <TrashIcon />, danger: true, onSelect: () => setDeleting(p) }]
+        : []),
+    ];
 
   return (
     <div className="page">
@@ -107,7 +108,7 @@ export function DocReposPage({ token, onSessionEnded }: Props) {
         {[
           { label: "Total documents", value: stats?.documents },
           { label: "Repositories", value: stats?.repositories },
-          { label: "Departments", value: stats?.departments },
+          { label: "With a role for me", value: stats?.mine },
           { label: "Updated this week", value: stats?.recent },
         ].map((s) => (
           <li key={s.label} className="stat">
@@ -131,9 +132,7 @@ export function DocReposPage({ token, onSessionEnded }: Props) {
         </div>
 
         {notice && (
-          <p className="notice" role="status">
-            {notice}
-          </p>
+          <MessageBar onClose={() => setNotice(null)}>{notice}</MessageBar>
         )}
 
         <div className="toolbar">
@@ -182,17 +181,17 @@ export function DocReposPage({ token, onSessionEnded }: Props) {
                   <span className="kb-card__icon">
                     <FolderIcon />
                   </span>
-                  {p.access.view_details ? (
+                  {p.access.view ? (
                     <a className="kb-card__name" href={`#doc-repo/${p.id}`}>
                       {p.name}
                     </a>
                   ) : (
-                    <span className="kb-card__name kb-card__name--locked" title={`Listed for everyone. To open it, ask a department admin of ${p.department.name} for a role.`}>
+                    <span className="kb-card__name kb-card__name--locked" title={`Listed for everyone. To open it, ask its owner${p.owner ? ` (${p.owner.display_name})` : ""} for a role.`}>
                       {p.name}
                     </span>
                   )}
-                  {!p.access.view_details && <span className="kb-badge">No access</span>}
-                  {p.access.manage && (
+                  {!p.access.view && <span className="kb-badge">No access</span>}
+                  {menuItems(p).length > 0 && (
                     <div className="kb-card__actions">
                       <Menu
                         trigger={(props) => (
@@ -209,9 +208,11 @@ export function DocReposPage({ token, onSessionEnded }: Props) {
                 <p className="kb-card__desc">{p.description || <span className="muted">No description</span>}</p>
                 <div className="kb-card__foot">
                   <span className="kb-card__updated">Updated {timeAgo(p.updated_at)}</span>
-                  <span className="kb-card__dept" title={p.department.name}>
-                    <span className="kb-card__dept-name">{p.department.name}</span>
-                  </span>
+                  {p.created_by && (
+                    <span className="kb-card__dept" title={`Created by ${p.created_by.display_name}`}>
+                      <span className="kb-card__dept-name">{p.created_by.display_name}</span>
+                    </span>
+                  )}
                 </div>
               </li>
             ))}
@@ -234,7 +235,7 @@ export function DocReposPage({ token, onSessionEnded }: Props) {
             onSaved={(p, created) => {
               setEditing(null);
               setNotice(created
-                ? `Created ${p.name} in ${p.department.name}. Open it to add members.`
+                ? `Created ${p.name}.`
                 : `Saved ${p.name}.`);
               load();
             }}
@@ -246,7 +247,8 @@ export function DocReposPage({ token, onSessionEnded }: Props) {
       <Modal open={deleting !== null} title="Delete repository" onClose={() => setDeleting(null)}>
         {deleting && (
           <ConfirmDelete
-            message={<>Delete <strong>{deleting.name}</strong> and its members? This can't be undone.</>}
+            message={<>Delete <strong>{deleting.name}</strong>? It disappears for everyone and its pending approvals
+              are withdrawn. Its documents are kept; a platform admin can restore it.</>}
             confirmLabel="Delete repository"
             onCancel={() => setDeleting(null)}
             onConfirm={async () => {

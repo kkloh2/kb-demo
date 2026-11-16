@@ -1,260 +1,206 @@
-"""Doc-repos: who can see and manage them, and their members.
+"""Document repositories: create, edit, (soft) delete and restore, and what each person may do.
 
-Department roles come from the caller's token (org_unit_roles); doc-repo roles from the database
-(doc_repo_members), since they are per resource and checked on every request. Changing someone's
-doc-repo roles therefore takes effect immediately, without signing them out.
+A repository is a DOC_REPO node under the DOC_HUB root. Creating one makes the creator its OWNER,
+applies the default team grants (e.g. AUDIT as AUDITOR), adds the usual metadata fields, and
+registers it with Approvals so its documents can be submitted.
 """
 
+import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.auth.identity import Principal
+from app.access import service as access
+from app.access.catalog import NodeType, P, SystemCode
+from app.access.models import AppUser, HierarchyNode, NodeStatus
+from app.approvals import service as approvals
+from app.audit import service as audit
+from app.audit.catalog import register_actions
+from app.documents import workflow_steps
 from app.core.errors import Conflict, InvalidRequest, NotFound
-from app.documents.models import DEPARTMENT_METADATA_KEYS, DOC_REPO_ROLE_ORDER, DocRepo, DocRepoMember, DocRepoRole
-from app.users.models import Department, User
-from app.users.service import get_by_lan_id, get_department, org_unit_roles_of
+from app.documents import metadata
+from app.documents.models import DocRepo, Document, DocumentStatus
 
-# Department roles that open a department's doc-repos (their page; documents need more).
-DETAIL_DEPARTMENT_ROLES = frozenset({"VIEWER", "DEPARTMENT_ADMIN"})
+RESOURCE_TYPE = "DOC_REPO"
+S = DocumentStatus
 
 
-@dataclass(frozen=True)
-class DocRepoAccess:
-    """What the caller can do with one doc-repo."""
+# --------------------------------------------------------------------------- lookups
 
-    department_roles: frozenset[str]  # the caller's roles in the doc-repo's department (token)
-    doc_repo_roles: frozenset[str]  # the caller's roles in the doc-repo itself (database)
+register_actions("DOC_HUB", {
+    "REPOSITORY_METADATA_SET": ("configuration", "Default metadata changed"),
+    "DOCUMENTS_UPLOADED": ("content", "Documents uploaded"),
+    "DOCUMENT_METADATA_SET": ("content", "Document metadata changed"),
+    "DOCUMENTS_DELETED": ("content", "Documents deleted"),
+    "DOCUMENT_DOWNLOADED": ("content", "Document downloaded"),
+})
 
-    @property
-    def manage(self) -> bool:
-        """Edit or delete the doc-repo and manage its members."""
-        return "DEPARTMENT_ADMIN" in self.department_roles
 
-    @property
-    def view_details(self) -> bool:
-        """Open the doc-repo's page: any doc-repo role, or VIEWER / DEPARTMENT_ADMIN of its department.
-        (Everyone with the PUBLIC system role sees it in the list.)"""
-        return bool(self.doc_repo_roles) or bool(DETAIL_DEPARTMENT_ROLES & self.department_roles)
+def get_repo(db: Session, doc_repo_id: uuid.UUID, *, include_deleted: bool = False) -> DocRepo:
+    repo = db.scalar(select(DocRepo).where(DocRepo.id == doc_repo_id).options(
+        selectinload(DocRepo.node), selectinload(DocRepo.created_by)))
+    if repo is None or (repo.node.status == NodeStatus.DELETED.value and not include_deleted):
+        raise NotFound("No such document repository.")
+    return repo
 
-    @property
-    def view_documents(self) -> bool:
-        """Any doc-repo role, or the department admin (a viewer of every doc-repo by default)."""
-        return bool(self.doc_repo_roles) or self.manage
 
-    @property
-    def upload(self) -> bool:
-        return DocRepoRole.MAKER.value in self.doc_repo_roles
+def repo_node(db: Session, doc_repo_id: uuid.UUID) -> uuid.UUID:
+    """For endpoint guards: the repository's node (404 when there's no such active repository)."""
+    return get_repo(db, doc_repo_id).hierarchy_node_id
 
-    @property
-    def review(self) -> bool:
-        return DocRepoRole.CHECKER.value in self.doc_repo_roles
+
+def any_repo_node(db: Session, doc_repo_id: uuid.UUID) -> uuid.UUID:
+    return get_repo(db, doc_repo_id, include_deleted=True).hierarchy_node_id
+
+
+# --------------------------------------------------------------------------- what the caller may do
 
 
 @dataclass(frozen=True)
-class DocRepoWithAccess:
-    doc_repo: DocRepo
-    access: DocRepoAccess
+class RepoAccess:
+    roles: frozenset[str]
+    permissions: frozenset[str]
+
+    def has(self, p: P) -> bool:
+        return p.value in self.permissions
+
+    def visible_statuses(self) -> set[str]:
+        statuses: set[str] = set()
+        if self.has(P.DOC_VIEW_ALL):
+            statuses |= {s.value for s in S}
+        if self.has(P.DOC_VIEW_SUBMITTED):
+            statuses |= {S.PENDING.value, S.CHANGES_REQUESTED.value, S.APPROVED.value, S.REJECTED.value}
+        if self.has(P.DOC_VIEW_APPROVED):
+            statuses.add(S.APPROVED.value)
+        return statuses
 
 
-# --------------------------------------------------------------------------- lookups & access
+def access_to(db: Session, user: AppUser, repo: DocRepo) -> RepoAccess:
+    roles = access.roles_at(db, user.id, repo.hierarchy_node_id)
+    return RepoAccess(frozenset(roles), frozenset(access.permissions_for(roles)))
 
 
-def get_doc_repo(db: Session, doc_repo_id: int) -> DocRepo:
-    doc_repo = db.scalar(select(DocRepo).where(DocRepo.id == doc_repo_id).options(selectinload(DocRepo.department)))
-    if doc_repo is None:
-        raise NotFound(f"No document repository {doc_repo_id}.")
-    return doc_repo
+@dataclass(frozen=True)
+class RepoWithAccess:
+    repo: DocRepo
+    access: RepoAccess
+    document_count: int  # documents the caller may see
 
 
-def doc_repo_roles_of(db: Session, lan_id: str, doc_repo_id: int) -> frozenset[str]:
-    """The user's roles in the doc-repo, from the database."""
-    return frozenset(db.scalars(
-        select(DocRepoMember.role)
-        .join(User, User.id == DocRepoMember.user_id)
-        .where(DocRepoMember.doc_repo_id == doc_repo_id, User.lan_id == lan_id.strip().lower())
+def _counts(db: Session, items: list[tuple[DocRepo, RepoAccess]]) -> dict[uuid.UUID, int]:
+    by_status: dict[uuid.UUID, dict[str, int]] = {}
+    ids = [r.id for r, _ in items]
+    if ids:
+        for repo_id, status, n in db.execute(
+            select(Document.doc_repo_id, Document.status, func.count())
+            .where(Document.doc_repo_id.in_(ids), Document.deleted_at.is_(None))
+            .group_by(Document.doc_repo_id, Document.status)
+        ):
+            by_status.setdefault(repo_id, {})[status] = n
+    return {r.id: sum(n for s, n in by_status.get(r.id, {}).items() if s in a.visible_statuses()) for r, a in items}
+
+
+def list_repos(db: Session, user: AppUser) -> list[RepoWithAccess]:
+    """Every active repository, most recently updated first, with what the caller may do in each."""
+    repos = db.scalars(
+        select(DocRepo).join(HierarchyNode, HierarchyNode.id == DocRepo.hierarchy_node_id)
+        .where(HierarchyNode.status == NodeStatus.ACTIVE.value)
+        .options(selectinload(DocRepo.node), selectinload(DocRepo.created_by))
+        .order_by(DocRepo.updated_at.desc(), DocRepo.id.desc())
+    ).all()
+    held = access.roles_by_node(db, user.id, [r.hierarchy_node_id for r in repos])
+    items = [(r, RepoAccess(frozenset(held.get(r.hierarchy_node_id, ())),
+                            frozenset(access.permissions_for(held.get(r.hierarchy_node_id, ()))))) for r in repos]
+    counts = _counts(db, items)
+    return [RepoWithAccess(r, a, counts[r.id]) for r, a in items]
+
+
+def with_access(db: Session, user: AppUser, repo: DocRepo) -> RepoWithAccess:
+    a = access_to(db, user, repo)
+    return RepoWithAccess(repo, a, _counts(db, [(repo, a)])[repo.id])
+
+
+def list_deleted(db: Session) -> list[DocRepo]:
+    return list(db.scalars(
+        select(DocRepo).join(HierarchyNode, HierarchyNode.id == DocRepo.hierarchy_node_id)
+        .where(HierarchyNode.status == NodeStatus.DELETED.value)
+        .options(selectinload(DocRepo.node), selectinload(DocRepo.created_by))
+        .order_by(HierarchyNode.deleted_at.desc())
     ))
 
 
-def access_to(db: Session, principal: Principal, doc_repo: DocRepo) -> DocRepoAccess:
-    return DocRepoAccess(
-        department_roles=org_unit_roles_of(principal).get(doc_repo.department.code, frozenset()),
-        doc_repo_roles=doc_repo_roles_of(db, principal.lan_id, doc_repo.id),
-    )
+# --------------------------------------------------------------------------- changes
 
 
-def list_doc_repos(db: Session, principal: Principal) -> list[DocRepoWithAccess]:
-    """Every doc-repo, most recently updated first, with what the caller can do with each. The
-    endpoint lets in callers with the PUBLIC system role; opening one needs more (see view_details)."""
-    department_roles = org_unit_roles_of(principal)
-    my_roles: dict[int, set[str]] = {}
-    for doc_repo_id, role in db.execute(
-        select(DocRepoMember.doc_repo_id, DocRepoMember.role)
-        .join(User, User.id == DocRepoMember.user_id)
-        .where(User.lan_id == principal.lan_id)
-    ):
-        my_roles.setdefault(doc_repo_id, set()).add(role)
-
-    doc_repos = db.scalars(
-        select(DocRepo)
-        .options(selectinload(DocRepo.department))
-        .order_by(DocRepo.updated_at.desc(), DocRepo.id.desc())
-    ).all()
-    return [
-        DocRepoWithAccess(p, DocRepoAccess(
-            department_roles=department_roles.get(p.department.code, frozenset()),
-            doc_repo_roles=frozenset(my_roles.get(p.id, ())),
-        ))
-        for p in doc_repos
-    ]
+def _require_unique_name(db: Session, name: str, other_than: uuid.UUID | None = None) -> None:
+    root = access.root_node(db, SystemCode.DOC_HUB)
+    for node in access.children(db, root):
+        if node.name.casefold() == name.casefold() and node.id != other_than:
+            raise Conflict(f"There's already a repository called {node.name!r}.")
 
 
-def manageable_departments(db: Session, principal: Principal) -> list[Department]:
-    """Departments the caller administers, i.e. can create doc-repos in. Sorted by code."""
-    codes = [code for code, roles in org_unit_roles_of(principal).items() if "DEPARTMENT_ADMIN" in roles]
-    return list(db.scalars(select(Department).where(Department.code.in_(codes)).order_by(Department.code)))
-
-
-# --------------------------------------------------------------------------- doc-repos
-#
-# Called from endpoints guarded by @OrgUnitRoles / @DocRepoRoles: they check the caller.
-
-
-@dataclass(frozen=True)
-class DocRepoFields:
-    name: str
-    description: str = ""
-    department_metadata: dict[str, str] | None = None  # DEPARTMENT_METADATA_KEYS
-
-    def cleaned(self) -> "DocRepoFields":
-        name = self.name.strip()
-        if not name:
-            raise InvalidRequest("Enter a repository name.")
-        return DocRepoFields(
-            name=name,
-            description=self.description.strip(),
-            department_metadata=clean_department_metadata(self.department_metadata or {}),
-        )
-
-
-def create_doc_repo(db: Session, actor_lan_id: str, department_code: str, fields: DocRepoFields) -> DocRepo:
-    """Create a doc-repo in the department. Callers must be its DEPARTMENT_ADMIN."""
-    department = get_department(db, department_code)
-    if department is None:
-        raise NotFound(f"No department {department_code.strip().upper()!r}.")
-    f = fields.cleaned()
-    _require_unique_name(db, department.id, f.name)
-    if not f.department_metadata["department"]:
-        f.department_metadata["department"] = department.name
-    actor = get_by_lan_id(db, actor_lan_id)
-    doc_repo = DocRepo(department_id=department.id, created_by_id=actor.id if actor else None, **_columns(f))
-    db.add(doc_repo)
-    db.commit()
-    return get_doc_repo(db, doc_repo.id)
-
-
-def update_doc_repo(db: Session, doc_repo_id: int, fields: DocRepoFields) -> DocRepo:
-    """Replace the doc-repo's name, description and department metadata."""
-    doc_repo = get_doc_repo(db, doc_repo_id)
-    f = fields.cleaned()
-    if f.name != doc_repo.name:
-        _require_unique_name(db, doc_repo.department_id, f.name, other_than=doc_repo.id)
-    for column, value in _columns(f).items():
-        setattr(doc_repo, column, value)
-    db.commit()
-    return get_doc_repo(db, doc_repo.id)
-
-
-def delete_doc_repo(db: Session, doc_repo_id: int) -> None:
-    """Delete the doc-repo with its members, fields and documents (stored files included)."""
-    from app.documents.documents import delete_doc_repo_files  # local import: avoids a cycle
-
-    db.delete(get_doc_repo(db, doc_repo_id))
-    db.commit()
-    delete_doc_repo_files(doc_repo_id)
-
-
-def _columns(f: DocRepoFields) -> dict:
-    return {
-        "name": f.name, "description": f.description, "department_metadata": f.department_metadata,
-    }
-
-
-def clean_department_metadata(values: dict[str, str | None]) -> dict[str, str]:
-    """Every key of DEPARTMENT_METADATA_KEYS, trimmed ("" when missing); other keys are refused."""
-    unknown = set(values) - set(DEPARTMENT_METADATA_KEYS)
-    if unknown:
-        raise InvalidRequest(f"Department metadata is {', '.join(DEPARTMENT_METADATA_KEYS)}, "
-                             f"not {', '.join(sorted(unknown))}.")
-    return {k: (values.get(k) or "").strip() for k in DEPARTMENT_METADATA_KEYS}
-
-
-def _require_unique_name(db: Session, department_id: int, name: str, other_than: int | None = None) -> None:
-    query = select(DocRepo.id).where(DocRepo.department_id == department_id, DocRepo.name == name)
-    if other_than is not None:
-        query = query.where(DocRepo.id != other_than)
-    if db.scalar(query) is not None:
-        raise Conflict(f"This department already has a document repository called {name!r}.")
-
-
-# --------------------------------------------------------------------------- members
-
-
-@dataclass(frozen=True)
-class Member:
-    user: User
-    roles: list[str]  # in DOC_REPO_ROLE_ORDER
-
-
-def list_members(db: Session, doc_repo_id: int) -> list[Member]:
-    """The doc-repo's members with their roles, sorted by name."""
-    get_doc_repo(db, doc_repo_id)
-    by_user: dict[int, tuple[User, set[str]]] = {}
-    for member in db.scalars(
-        select(DocRepoMember).where(DocRepoMember.doc_repo_id == doc_repo_id).options(selectinload(DocRepoMember.user))
-    ):
-        by_user.setdefault(member.user_id, (member.user, set()))[1].add(member.role)
-    members = [Member(user, _ordered(roles)) for user, roles in by_user.values()]
-    return sorted(members, key=lambda m: (m.user.display_name.lower(), m.user.lan_id))
-
-
-def set_member_roles(db: Session, actor_lan_id: str, doc_repo_id: int, lan_id: str, roles: list[str]) -> Member:
-    """Make the user's roles in the doc-repo exactly `roles` ([] removes them from the doc-repo).
-    MAKER and CHECKER can't be held together in one doc-repo."""
-    wanted = _parse_doc_repo_roles(roles)
-    if {DocRepoRole.MAKER.value, DocRepoRole.CHECKER.value} <= wanted:
-        raise Conflict("One person can't be both maker and checker in a document repository.")
-    get_doc_repo(db, doc_repo_id)
-    user = get_by_lan_id(db, lan_id)
-    if user is None:
-        raise NotFound(
-            f"No user with LAN ID {lan_id.strip().lower()!r}. They get one when they first sign in, "
-            f"or a system admin can add them."
-        )
-    actor = get_by_lan_id(db, actor_lan_id)
-    current = {m.role: m for m in db.scalars(
-        select(DocRepoMember).where(DocRepoMember.doc_repo_id == doc_repo_id, DocRepoMember.user_id == user.id)
-    )}
-    for role in set(current) - wanted:
-        db.delete(current[role])
+def create_repo(db: Session, actor: AppUser, name: str, description: str,
+                fields: list[tuple[str, str]] | None) -> DocRepo:
+    """Create a repository; the creator becomes its owner. Commits."""
+    name = " ".join(name.split())
+    if not name:
+        raise InvalidRequest("Enter a repository name.")
+    _require_unique_name(db, name)
+    root = access.root_node(db, SystemCode.DOC_HUB)
+    node = access.create_child(db, actor, root, NodeType.DOC_REPO, name)
+    repo = DocRepo(hierarchy_node_id=node.id, description=description.strip(), created_by_id=actor.id)
+    db.add(repo)
     db.flush()
-    for role in wanted - set(current):
-        db.add(DocRepoMember(doc_repo_id=doc_repo_id, user_id=user.id, role=role,
-                             granted_by_id=actor.id if actor else None))
+    pairs = fields if fields is not None else [(label, "") for label in metadata.DEFAULT_REPOSITORY_FIELDS]
+    metadata.set_node_metadata(db, actor, node, pairs)
+    approvals.register_resource(db, SystemCode.DOC_HUB.value, RESOURCE_TYPE, str(repo.id), name, node.id)
+    workflow_steps.bind_default(db, node.id, actor.id)  # its owner or admins can choose another
     db.commit()
-    return Member(user, _ordered(wanted))
+    return get_repo(db, repo.id)
 
 
-def _parse_doc_repo_roles(names: list[str]) -> set[str]:
-    roles = set()
-    for name in names:
-        code = name.strip().upper()
-        if code not in DocRepoRole.__members__:
-            raise InvalidRequest(f"Repository roles are MAKER, CHECKER and VIEWER, not {name!r}.")
-        roles.add(code)
-    return roles
+def update_repo(db: Session, actor: AppUser, repo: DocRepo, name: str, description: str) -> DocRepo:
+    name = " ".join(name.split())
+    if not name:
+        raise InvalidRequest("Enter a repository name.")
+    before = {"name": repo.node.name, "description": repo.description}
+    if name != repo.node.name:
+        _require_unique_name(db, name, other_than=repo.node.id)
+        repo.node.name = name
+        approvals.rename_resource(db, SystemCode.DOC_HUB.value, RESOURCE_TYPE, str(repo.id), name)
+    repo.description = description.strip()
+    after = {"name": repo.node.name, "description": repo.description}
+    if before != after:
+        access.record(db, actor, "NODE_UPDATED", "node", str(repo.node.id), repo.node.id, audit.diff(before, after))
+    db.commit()
+    return get_repo(db, repo.id)
 
 
-def _ordered(roles: set[str]) -> list[str]:
-    return [r.value for r in DOC_REPO_ROLE_ORDER if r.value in roles]
+def set_repo_metadata(db: Session, actor: AppUser, repo: DocRepo, pairs: list[tuple[str, str]]) -> None:
+    before = {e.field.label: e.value for e in metadata.node_entries(db, repo.node.id)}
+    metadata.set_node_metadata(db, actor, repo.node, pairs)
+    after = {e.field.label: e.value for e in metadata.node_entries(db, repo.node.id)}
+    if before != after:
+        access.record(db, actor, "REPOSITORY_METADATA_SET", "node", str(repo.node.id), repo.node.id,
+                      audit.diff(before, after))
+    db.commit()
+
+
+def delete_repo(db: Session, actor: AppUser, repo: DocRepo) -> None:
+    """Soft delete: hidden everywhere, everything kept; its pending approvals are cancelled. Commits."""
+    access.soft_delete(db, actor, repo.node)
+    approvals.set_resource_active(db, SystemCode.DOC_HUB.value, RESOURCE_TYPE, str(repo.id), False, actor)
+    for doc in db.scalars(select(Document).where(Document.doc_repo_id == repo.id,
+                                                  Document.status == S.PENDING.value)):
+        doc.status = S.DRAFT.value  # its request was cancelled; the maker can submit again after a restore
+    db.commit()
+
+
+def restore_repo(db: Session, actor: AppUser, repo: DocRepo) -> DocRepo:
+    """Platform admins: bring a deleted repository back. Commits."""
+    _require_unique_name(db, repo.node.name, other_than=repo.node.id)
+    access.restore(db, actor, repo.node)
+    approvals.register_resource(db, SystemCode.DOC_HUB.value, RESOURCE_TYPE, str(repo.id), repo.node.name, repo.node.id)
+    db.commit()
+    return get_repo(db, repo.id)

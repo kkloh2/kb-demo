@@ -7,7 +7,7 @@ Token claims (besides the standard iss/aud/iat/exp):
     email       email           | from the directory at sign-in
     department  department      |
     title       job title      /
-    ...         any claims added by sign-in hooks (e.g. "system_roles", "org_unit_roles" from app.users)
+    ...         any claims added by sign-in hooks (e.g. "system_roles" from app.access)
 
 Auth knows nothing about Data Hub's own user records, roles or access: other modules take part
 in sign-in through app.auth.hooks and look people up by LAN ID (Principal.lan_id).
@@ -22,6 +22,8 @@ import jwt
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
+from app.audit import service as audit
+from app.audit.catalog import register_actions
 from app.auth import hooks, ldap
 from app.auth.errors import Unauthenticated
 from app.auth.identity import Identity, Principal
@@ -31,6 +33,14 @@ from app.core.config import get_settings
 from app.db.base import utcnow
 
 INVALID_CREDENTIALS = "Incorrect LAN ID or password."
+
+register_actions("PLATFORM", {
+    "SIGN_IN": ("security", "Signed in"),
+    "SIGN_IN_FAILED": ("security", "Sign-in failed", "Wrong password, unknown LAN ID, or refused by the directory."),
+    "SIGN_IN_REFUSED": ("security", "Sign-in refused", "The password was right but Data Hub refused it (e.g. "
+                                                       "access switched off)."),
+    "SESSIONS_ENDED": ("security", "Sessions ended", "Someone's sessions were ended, e.g. their access changed."),
+})
 
 
 @dataclass(frozen=True)
@@ -57,6 +67,7 @@ def authenticate(
 
     entry = ldap.authenticate(lan_id, password)  # DirectoryUnavailable (503) passes through
     if entry is None:  # wrong password, unknown LAN ID, or locked/disabled in the directory
+        audit.record_now("SIGN_IN_FAILED", actor_lan_id=lan_id, target=("user", lan_id))
         raise Unauthenticated(INVALID_CREDENTIALS)
     identity = Identity(
         lan_id=lan_id,
@@ -65,7 +76,12 @@ def authenticate(
         department=entry.department,
         title=entry.title,
     )
-    extra_claims = hooks.run_sign_in_hooks(db, identity)
+    try:
+        extra_claims = hooks.run_sign_in_hooks(db, identity)
+    except Unauthenticated as e:  # e.g. access switched off in Data Hub
+        db.rollback()
+        audit.record_now("SIGN_IN_REFUSED", actor_lan_id=lan_id, target=("user", lan_id), details={"reason": e.message})
+        raise
 
     now = utcnow()
     expires_at = now + timedelta(minutes=s.access_token_minutes)
@@ -78,6 +94,7 @@ def authenticate(
         user_agent=(user_agent or "")[:256] or None,
     )
     db.add(session)
+    audit.record(db, "SIGN_IN", actor_lan_id=lan_id, target=("user", lan_id), details={"session": session.id})
     token = encode_token(
         {
             **extra_claims,
@@ -138,9 +155,13 @@ def logout(db: Session, principal: Principal) -> None:
 def revoke_sessions(db: Session, lan_id: str, reason: str) -> int:
     """End every active session of a person, e.g. after their roles change (their token's claims
     are now stale). Adds to the caller's transaction; the caller commits. Returns the count."""
+    lan_id = lan_id.strip().lower()
     result = db.execute(
         update(AuthSession)
-        .where(AuthSession.lan_id == lan_id.strip().lower(), AuthSession.revoked_at.is_(None))
+        .where(AuthSession.lan_id == lan_id, AuthSession.revoked_at.is_(None))
         .values(revoked_at=utcnow(), revoked_reason=reason)
     )
-    return result.rowcount or 0
+    count = result.rowcount or 0
+    if count:
+        audit.record(db, "SESSIONS_ENDED", target=("user", lan_id), details={"reason": reason, "sessions": count})
+    return count

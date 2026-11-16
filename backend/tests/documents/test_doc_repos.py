@@ -1,276 +1,249 @@
-"""Doc-repos: who sees, creates and manages them; doc-repo members; the @DocRepoRoles guard."""
+"""Repositories: creating (owner), listing, members, ownership, soft delete and restore, team grants."""
 
 import pytest
-
-from app.db.session import new_session
-from app.users import service as users
-
-EXTRA_DIRECTORY_USERS = """
-  risk.admin:
-    password: demo123
-    display_name: Rita Lim
-    email: rita.lim@datahub.local
-    department: Risk Management
-    title: Risk Lead
-  risk.viewer:
-    password: demo123
-    display_name: Victor Ng
-    email: victor.ng@datahub.local
-    department: Risk Management
-    title: Risk Analyst
-  hr.admin:
-    password: demo123
-    display_name: Hari Kumar
-    email: hari.kumar@datahub.local
-    department: Human Resources
-    title: HR Lead
-  outsider:
-    password: demo123
-    display_name: Olive Out
-    email: olive.out@datahub.local
-    department: Operations
-    title: Ops Analyst
-"""
-
-ROLES = {
-    "risk.admin": {"RISK": ["DEPARTMENT_ADMIN"]},
-    "risk.viewer": {"RISK": ["VIEWER"]},
-    "hr.admin": {"HR": ["DEPARTMENT_ADMIN"]},
-    "outsider": {},
-}
+from tests.helpers import set_roles
 
 
-@pytest.fixture
-def people(client, directory, login):
-    """Signed-in callers with department roles set first, so each token is current."""
-    directory.write_text(directory.read_text() + EXTRA_DIRECTORY_USERS)
-    admin = login("admin")
-    for lan_id in ROLES:
-        login(lan_id, "demo123")
-    with new_session() as db:
-        for lan_id, org in ROLES.items():
-            u = users.get_by_lan_id(db, lan_id)
-            users.upsert_user(db, "admin", lan_id, display_name=u.display_name, email=u.email,
-                              system_roles=["PUBLIC"], org_unit_roles=org)
-    return {"admin": admin, **{lan_id: login(lan_id, "demo123") for lan_id in ROLES}}
-
-
-CARD_POLICIES = {"name": "Card Policies", "description": "Credit card policy documents",
-                 "department_metadata": {"business_unit": "Consumer Banking", "country": "Singapore"}}
-
-
-def _create(client, people, who="risk.admin", dept="RISK", body=CARD_POLICIES):
-    return client.post(f"/api/departments/{dept}/doc-repos", json=body, headers=people[who])
-
-
-def _doc_repo_id(client, people):
-    r = _create(client, people)
+def _repo(client, hub, who="ben", name="Card Policies", **extra):
+    r = client.post("/api/doc-repos", json={"name": name, **extra}, headers=hub[who])
     assert r.status_code == 201, r.text
-    return r.json()["id"]
+    return r.json()
 
 
-# --------------------------------------------------------------------------- create
+def test_the_creator_becomes_the_owner(client, hub):
+    body = client.get(f"/api/doc-repos/{hub['repo']}", headers=hub["ben"]).json()
+    assert body["owner"]["lan_id"] == "ben" and body["access"]["roles"] == ["OWNER"]
+    assert body["access"]["delete"] is True and body["access"]["upload"] is False  # owners don't upload
+    assert body["metadata"] == [{"label": "Department", "value": "Risk Management"},
+                                {"label": "Country", "value": "Singapore"}]
 
 
-def test_department_admin_creates_a_doc_repo_with_department_metadata(client, people):
-    r = _create(client, people, dept="risk")
-    assert r.status_code == 201
-    body = r.json()
-    assert r.headers["location"] == f"/api/doc-repos/{body['id']}"
-    assert (body["name"], body["description"]) == (CARD_POLICIES["name"], CARD_POLICIES["description"])
-    # one JSON value; an empty department becomes the department's name
-    assert body["department_metadata"] == {"department": "Risk Management", "business_unit": "Consumer Banking",
-                                           "country": "Singapore"}
-    assert body["department"] == {"code": "RISK", "name": "Risk Management"}
-    assert body["created_by"] == "Rita Lim"
-    assert body["access"] == {"manage": True, "view_details": True, "view_documents": True, "upload": False, "review": False,
-                              "doc_repo_roles": []}
+def test_new_repositories_start_with_no_metadata_fields(client, hub):
+    assert _repo(client, hub)["metadata"] == []
 
 
-def test_department_metadata_keeps_a_given_department_and_refuses_other_keys(client, people):
-    given = {**CARD_POLICIES, "department_metadata": {"department": "Credit Risk", "country": "SG"}}
-    r = _create(client, people, body=given)
-    assert r.json()["department_metadata"] == {"department": "Credit Risk", "business_unit": "", "country": "SG"}
-    other = {**CARD_POLICIES, "name": "Other", "department_metadata": {"purpose": "Loan"}}
-    assert _create(client, people, body=other).status_code == 422
+@pytest.mark.parametrize("who", ["dana", "marcus", "cara", "eve", "analyst"])
+def test_only_doc_hub_admins_create_repositories(client, hub, who):
+    assert client.post("/api/doc-repos", json={"name": "Mine"}, headers=hub[who]).status_code == 403
 
 
-def test_doc_repo_names_are_unique_within_a_department(client, people):
-    assert _create(client, people).status_code == 201
-    assert _create(client, people).status_code == 409
-    other = {**CARD_POLICIES, "name": "card policies "}  # names are trimmed, case matters
-    assert _create(client, people, body=other).status_code == 201
-
-
-@pytest.mark.parametrize("who", ["hr.admin", "risk.viewer", "outsider", "admin"])
-def test_only_that_departments_admin_creates_doc_repos(client, people, who):
-    assert _create(client, people, who=who).status_code == 403
-
-
-def test_creatable_departments(client, people):
-    assert client.get("/api/doc-repos/departments", headers=people["risk.admin"]).json() == [
-        {"code": "RISK", "name": "Risk Management"}]
-    assert client.get("/api/doc-repos/departments", headers=people["risk.viewer"]).json() == []
-
-
-# --------------------------------------------------------------------------- see
-
-
-def test_everyone_with_the_public_role_sees_the_list_but_not_every_page(client, people):
-    _doc_repo_id(client, people)
-
-    def listed(who):
-        return [(p["name"], p["access"]["view_details"]) for p in client.get("/api/doc-repos", headers=people[who]).json()]
-
-    assert listed("risk.admin") == [("Card Policies", True)]
-    assert listed("risk.viewer") == [("Card Policies", True)]  # department VIEWER opens it
-    assert listed("hr.admin") == [("Card Policies", False)]  # other department: listed only
-    assert listed("outsider") == [("Card Policies", False)]
-
-
-def test_the_list_needs_the_public_role(client, people, login):
-    _doc_repo_id(client, people)
-    with new_session() as db:
-        u = users.get_by_lan_id(db, "outsider")
-        users.upsert_user(db, "admin", "outsider", display_name=u.display_name, email=u.email,
-                          system_roles=[], org_unit_roles={})
-    assert client.get("/api/doc-repos", headers=login("outsider", "demo123")).status_code == 403
-
-
-def test_department_viewer_sees_the_doc_repo_but_not_its_documents(client, people):
-    pid = _doc_repo_id(client, people)
-    r = client.get(f"/api/doc-repos/{pid}", headers=people["risk.viewer"])
-    assert r.status_code == 200
-    assert r.json()["access"] == {"manage": False, "view_details": True, "view_documents": False, "upload": False,
-                                  "review": False,
-                                  "doc_repo_roles": []}
-
-
-def test_department_admin_is_a_viewer_of_every_doc_repo(client, people):
-    pid = _doc_repo_id(client, people)
-    assert client.get(f"/api/doc-repos/{pid}", headers=people["risk.admin"]).json()["access"]["view_documents"]
-
-
-@pytest.mark.parametrize("who", ["hr.admin", "outsider", "admin"])
-def test_others_cannot_see_the_doc_repo(client, people, who):
-    pid = _doc_repo_id(client, people)
-    assert client.get(f"/api/doc-repos/{pid}", headers=people[who]).status_code == 403
-
-
-def test_missing_doc_repo(client, people):
-    assert client.get("/api/doc-repos/999", headers=people["risk.admin"]).status_code == 404
-
-
-def test_doc_repos_need_sign_in(client):
-    assert client.get("/api/doc-repos").status_code == 401
-    assert client.get("/api/doc-repos/1").status_code == 401
-
-
-# --------------------------------------------------------------------------- update & delete
-
-
-def test_department_admin_updates_and_deletes(client, people):
-    pid = _doc_repo_id(client, people)
-    body = {**CARD_POLICIES, "name": "Card Policies 2027"}
-    r = client.put(f"/api/doc-repos/{pid}", json=body, headers=people["risk.admin"])
-    assert (r.status_code, r.json()["name"]) == (200, "Card Policies 2027")
-    assert client.delete(f"/api/doc-repos/{pid}", headers=people["risk.admin"]).status_code == 204
-    assert client.get(f"/api/doc-repos/{pid}", headers=people["risk.admin"]).status_code == 404
-
-
-@pytest.mark.parametrize("who", ["risk.viewer", "hr.admin", "outsider"])
-def test_others_cannot_update_or_delete(client, people, who):
-    pid = _doc_repo_id(client, people)
-    assert client.put(f"/api/doc-repos/{pid}", json=CARD_POLICIES, headers=people[who]).status_code == 403
-    assert client.delete(f"/api/doc-repos/{pid}", headers=people[who]).status_code == 403
-
-
-def test_department_with_doc_repos_cannot_be_deleted(client, people):
-    _doc_repo_id(client, people)
-    r = client.delete("/api/departments/RISK", headers=people["admin"])
+def test_names_are_unique(client, hub):
+    r = client.post("/api/doc-repos", json={"name": "loan risks"}, headers=hub["andy"])
     assert r.status_code == 409
-    assert "document repositories" in r.json()["detail"]
-    with new_session() as db:  # nothing was removed, roles included
-        assert users.get_department(db, "RISK") is not None
-        assert users.org_unit_roles(db, users.get_by_lan_id(db, "risk.admin")) == {"RISK": {"DEPARTMENT_ADMIN"}}
 
 
-# --------------------------------------------------------------------------- members
+def test_everyone_sees_the_list_but_opens_only_their_repositories(client, hub):
+    items = {r["name"]: r for r in client.get("/api/doc-repos", headers=hub["analyst"]).json()}
+    assert items["Loan Risks"]["access"]["view"] is False and items["Loan Risks"]["document_count"] == 0
+    assert client.get(f"/api/doc-repos/{hub['repo']}", headers=hub["analyst"]).status_code == 403
+    assert client.get(f"/api/doc-repos/{hub['repo']}", headers=hub["eve"]).status_code == 200
 
 
-def _set(client, people, pid, lan_id, roles, who="risk.admin"):
-    return client.put(f"/api/doc-repos/{pid}/members/{lan_id}", json={"roles": roles}, headers=people[who])
+def test_doc_hub_admins_do_not_reach_into_repositories(client, hub):
+    """Root ADMIN is node scope: Andy can create repositories but not manage Ben's."""
+    assert client.get(f"/api/doc-repos/{hub['repo']}", headers=hub["andy"]).status_code == 403
+    assert client.delete(f"/api/doc-repos/{hub['repo']}", headers=hub["andy"]).status_code == 403
+    assert client.put(f"/api/doc-repos/{hub['repo']}/members/andy", json={"groups": []},
+                      headers=hub["andy"]).status_code == 403
+    assert client.get(f"/api/doc-repos/{hub['repo']}/groups", headers=hub["andy"]).status_code == 403
 
 
-def test_department_admin_gives_doc_repo_roles(client, people):
-    pid = _doc_repo_id(client, people)
-    r = _set(client, people, pid, "risk.viewer", ["checker", "VIEWER"])
-    assert (r.status_code, r.json()["roles"]) == (200, ["CHECKER", "VIEWER"])
-    assert _set(client, people, pid, "outsider", ["MAKER"]).status_code == 200
-    members = client.get(f"/api/doc-repos/{pid}/members", headers=people["risk.admin"]).json()
-    assert [(m["lan_id"], m["roles"]) for m in members] == [("outsider", ["MAKER"]), ("risk.viewer", ["CHECKER", "VIEWER"])]
-
-
-def test_doc_repo_roles_take_effect_without_signing_in_again(client, people):
-    pid = _doc_repo_id(client, people)
-    assert client.get(f"/api/doc-repos/{pid}", headers=people["outsider"]).status_code == 403
-    _set(client, people, pid, "outsider", ["MAKER"])
-    r = client.get(f"/api/doc-repos/{pid}", headers=people["outsider"])  # same token as before
+def test_repository_admins_manage_members_but_cannot_delete_or_create(client, hub):
+    r = set_roles(client, hub['repo'], "outsider", ["VIEWER"], hub["dana"])
     assert r.status_code == 200
-    assert r.json()["access"] == {"manage": False, "view_details": True, "view_documents": True, "upload": True,
-                                  "review": False,
-                                  "doc_repo_roles": ["MAKER"]}
-    listed = client.get("/api/doc-repos", headers=people["outsider"]).json()
-    assert [(p["name"], p["access"]["view_details"]) for p in listed] == [("Card Policies", True)]
+    assert client.delete(f"/api/doc-repos/{hub['repo']}", headers=hub["dana"]).status_code == 403
+    assert client.post("/api/doc-repos", json={"name": "Dana's"}, headers=hub["dana"]).status_code == 403
 
 
-def test_member_roles_replace_and_remove(client, people):
-    pid = _doc_repo_id(client, people)
-    _set(client, people, pid, "risk.viewer", ["MAKER"])
-    assert _set(client, people, pid, "risk.viewer", ["CHECKER"]).json()["roles"] == ["CHECKER"]  # swap
-    assert client.delete(f"/api/doc-repos/{pid}/members/risk.viewer", headers=people["risk.admin"]).status_code == 204
-    assert client.get(f"/api/doc-repos/{pid}/members", headers=people["risk.admin"]).json() == []
+def test_members_and_their_roles(client, hub):
+    body = client.get(f"/api/doc-repos/{hub['repo']}/members", headers=hub["dana"]).json()
+    assert {m["lan_id"]: m["roles"] for m in body["members"]} == {
+        "ben": ["OWNER"], "dana": ["ADMIN"], "marcus": ["MAKER"], "mia": ["MAKER"], "cara": ["CHECKER"],
+        "chris": ["CHECKER"], "eve": ["VIEWER"]}
+    assert [(g["name"], g["member_count"], g["default"]) for g in body["groups"]] == [
+        ("Users", 2, True), ("Admins", 1, False), ("Checkers", 2, False), ("Makers", 2, False)]
+    assert body["grantable_roles"] == ["ADMIN", "MAKER", "CHECKER", "VIEWER"] and body["team_grants"] == []
 
 
-@pytest.mark.parametrize("roles, status", [(["MAKER", "CHECKER"], 409), (["OWNER"], 422), (["DEPARTMENT_ADMIN"], 422)])
-def test_member_role_rules(client, people, roles, status):
-    pid = _doc_repo_id(client, people)
-    assert _set(client, people, pid, "risk.viewer", roles).status_code == status
+@pytest.mark.parametrize("roles", [["OWNER"], ["AUDITOR"], ["NOPE"]])
+def test_roles_a_person_can_be_given_in_a_group(client, hub, roles):
+    url = f"/api/doc-repos/{hub['repo']}"
+    group = client.post(f"{url}/groups", json={"name": "Reviewers"}, headers=hub["ben"]).json()["id"]
+    r = client.put(f"{url}/members/outsider", json={"groups": [{"id": group, "roles": roles}]}, headers=hub["ben"])
+    assert r.status_code == 422
 
 
-def test_unknown_member(client, people):
-    pid = _doc_repo_id(client, people)
-    assert _set(client, people, pid, "nobody", ["VIEWER"]).status_code == 404
+def test_group_names_are_unique_per_repository(client, hub):
+    url = f"/api/doc-repos/{hub['repo']}/groups"
+    assert client.post(url, json={"name": "makers"}, headers=hub["ben"]).status_code == 409
+    other = client.post("/api/doc-repos", json={"name": "Other"}, headers=hub["andy"]).json()
+    assert client.post(f"/api/doc-repos/{other['id']}/groups", json={"name": "Makers"}, headers=hub["andy"]).status_code == 201
 
 
-@pytest.mark.parametrize("who", ["risk.viewer", "hr.admin", "outsider"])
-def test_only_the_department_admin_manages_members(client, people, who):
-    pid = _doc_repo_id(client, people)
-    assert client.get(f"/api/doc-repos/{pid}/members", headers=people[who]).status_code == 403
-    assert _set(client, people, pid, "risk.viewer", ["VIEWER"], who=who).status_code == 403
+def test_each_person_holds_their_own_roles_in_a_group(client, hub):
+    url = f"/api/doc-repos/{hub['repo']}"
+    r = client.post(f"{url}/groups", json={"name": "default"}, headers=hub["dana"])
+    assert r.status_code == 201 and r.json()["member_count"] == 0 and "roles" not in r.json()
+    group = r.json()["id"]
+    assert client.get(url, headers=hub["outsider"]).status_code == 403
+    r = client.put(f"{url}/members/outsider", json={"groups": [{"id": group, "roles": ["VIEWER"]}]}, headers=hub["dana"])
+    assert r.status_code == 200 and r.json()["groups"] == [{"id": group, "name": "default", "roles": ["VIEWER"]}]
+    assert client.get(url, headers=hub["outsider"]).json()["access"]["roles"] == ["VIEWER"]
+    r = client.put(f"{url}/members/eve", json={"groups": [{"id": group, "roles": ["CHECKER"]}]}, headers=hub["dana"])
+    roles = {m["lan_id"]: m["groups"] for m in client.get(f"{url}/members", headers=hub["dana"]).json()["members"]}
+    assert roles["outsider"] == [{"id": group, "name": "default", "roles": ["VIEWER"]}]  # same group, own roles
+    assert roles["eve"] == [{"id": group, "name": "default", "roles": ["CHECKER"]}]  # (eve left "Users")
+    r = client.put(f"{url}/groups/{group}", json={"name": "Credit reviewers"}, headers=hub["dana"])
+    assert r.status_code == 200 and r.json()["name"] == "Credit reviewers" and r.json()["member_count"] == 2
+    actions = [e["action"] for e in client.get("/api/audit", headers=hub["admin"]).json()["items"]]
+    assert {"GROUP_CREATED", "GROUP_RENAMED", "MEMBER_GROUPS_SET"} <= set(actions)
 
 
-def test_doc_repo_members_cannot_manage_the_doc_repo(client, people):
-    pid = _doc_repo_id(client, people)
-    _set(client, people, pid, "outsider", ["CHECKER"])
-    assert client.put(f"/api/doc-repos/{pid}", json=CARD_POLICIES, headers=people["outsider"]).status_code == 403
-    assert _set(client, people, pid, "outsider", ["MAKER"], who="outsider").status_code == 403
+def test_a_person_can_be_both_maker_and_checker_in_a_group(client, hub):
+    """Separation of duties is per document: nobody decides their own submission (test_approvals)."""
+    url = f"/api/doc-repos/{hub['repo']}"
+    group = client.post(f"{url}/groups", json={"name": "Policy team"}, headers=hub["ben"]).json()["id"]
+    r = client.put(f"{url}/members/outsider", json={"groups": [{"id": group, "roles": ["MAKER", "CHECKER"]}]},
+                   headers=hub["ben"])
+    assert r.status_code == 200
+    assert set(client.get(url, headers=hub["outsider"]).json()["access"]["roles"]) == {"MAKER", "CHECKER"}
 
 
-# --------------------------------------------------------------------------- the guard itself
+def test_groups_of_another_repository_are_refused(client, hub):
+    other = client.post("/api/doc-repos", json={"name": "Other"}, headers=hub["andy"]).json()
+    theirs = client.get(f"/api/doc-repos/{other['id']}/groups", headers=hub["andy"]).json()["groups"][0]["id"]
+    r = client.put(f"/api/doc-repos/{hub['repo']}/members/eve", json={"groups": [{"id": theirs, "roles": ["VIEWER"]}]},
+                   headers=hub["ben"])
+    assert r.status_code == 422
+    assert client.put(f"/api/doc-repos/{hub['repo']}/groups/{theirs}", json={"name": "X"},
+                      headers=hub["ben"]).status_code == 404
 
 
-def test_doc_repo_roles_guard_validates_when_the_module_loads():
-    from app.documents.authorization import DocRepoRoles
+def test_roles_take_effect_without_signing_in_again(client, hub):
+    url = f"/api/doc-repos/{hub['repo']}"
+    assert client.get(url, headers=hub["outsider"]).status_code == 403
+    set_roles(client, hub["repo"], "outsider", ["VIEWER"], hub["ben"])
+    assert client.get(url, headers=hub["outsider"]).status_code == 200
+    client.delete(f"{url}/members/outsider", headers=hub["ben"])
+    assert client.get(url, headers=hub["outsider"]).status_code == 403
 
-    with pytest.raises(ValueError):
-        DocRepoRoles("OWNER")
-    with pytest.raises(ValueError):
-        DocRepoRoles(department_roles=("SYSTEM_ADMIN",))
-    with pytest.raises(ValueError):
-        DocRepoRoles()
-    with pytest.raises(TypeError, match="'doc_repo_id'"):
 
-        @DocRepoRoles("VIEWER")
-        def endpoint(code: str):
-            return code
+def test_the_owner_cannot_be_removed(client, hub):
+    url = f"/api/doc-repos/{hub['repo']}"
+    assert client.delete(f"{url}/members/ben", headers=hub["dana"]).status_code == 204
+    assert client.get(url, headers=hub["ben"]).json()["access"]["roles"] == ["OWNER"]
+
+
+def test_owner_hands_ownership_over_and_stays_admin(client, hub):
+    url = f"/api/doc-repos/{hub['repo']}"
+    assert client.put(f"{url}/owner", json={"lan_id": "dana"}, headers=hub["dana"]).status_code == 403
+    assert client.put(f"{url}/owner", json={"lan_id": "dana"}, headers=hub["ben"]).status_code == 204
+    roles = {m["lan_id"]: m["roles"] for m in client.get(f"{url}/members", headers=hub["dana"]).json()["members"]}
+    assert roles["dana"] == ["OWNER", "ADMIN"] and roles["ben"] == ["ADMIN"]
+    assert client.delete(url, headers=hub["ben"]).status_code == 403  # only the owner deletes
+
+
+def test_platform_admin_reassigns_an_owner(client, hub):
+    node = client.get(f"/api/doc-repos/{hub['repo']}", headers=hub["ben"]).json()["node_id"]
+    assert client.put(f"/api/nodes/{node}/owner", json={"lan_id": "dana"}, headers=hub["ben"]).status_code == 403
+    assert client.put(f"/api/nodes/{node}/owner", json={"lan_id": "dana"}, headers=hub["admin"]).status_code == 204
+    assert client.get(f"/api/doc-repos/{hub['repo']}", headers=hub["dana"]).json()["owner"]["lan_id"] == "dana"
+    actions = [e["action"] for e in client.get("/api/audit", headers=hub["admin"]).json()["items"]]
+    assert "OWNER_REASSIGNED" in actions
+
+
+def test_soft_delete_and_restore(client, hub):
+    url = f"/api/doc-repos/{hub['repo']}"
+    assert client.delete(url, headers=hub["ben"]).status_code == 204
+    assert client.get(url, headers=hub["ben"]).status_code == 404
+    assert "Loan Risks" not in {r["name"] for r in client.get("/api/doc-repos", headers=hub["eve"]).json()}
+    deleted = client.get("/api/doc-repos/deleted", headers=hub["admin"]).json()
+    assert [d["name"] for d in deleted] == ["Loan Risks"] and deleted[0]["deleted_at"]
+    assert client.post(f"{url}/restore", headers=hub["ben"]).status_code == 403
+    assert client.post(f"{url}/restore", headers=hub["admin"]).status_code == 200
+    assert client.get(url, headers=hub["eve"]).status_code == 200  # members came back with it
+
+
+def test_owner_and_admins_edit_name_description_and_metadata(client, hub):
+    url = f"/api/doc-repos/{hub['repo']}"
+    r = client.put(url, json={"name": "Loan Risk Policies", "description": "x"}, headers=hub["dana"])
+    assert r.status_code == 200 and r.json()["name"] == "Loan Risk Policies"
+    r = client.put(f"{url}/metadata", json=[{"label": "Country", "value": "SG"}], headers=hub["ben"])
+    assert r.json() == [{"label": "Country", "value": "SG"}]
+    assert client.put(url, json={"name": "Nope"}, headers=hub["marcus"]).status_code == 403
+
+
+@pytest.mark.parametrize("pairs", [[{"label": "A", "value": "1"}, {"label": "a", "value": "2"}],
+                                   [{"label": " ", "value": "1"}]])
+def test_bad_repository_metadata(client, hub, pairs):
+    assert client.put(f"/api/doc-repos/{hub['repo']}/metadata", json=pairs, headers=hub["ben"]).status_code == 422
+
+
+def test_default_grants_give_teams_read_only_access_to_new_and_existing_repositories(client, hub):
+    admin = hub["admin"]
+    url = f"/api/doc-repos/{hub['repo']}"
+    assert client.get(url, headers=hub["ivan"]).status_code == 403
+    grant = client.post("/api/default-grants", json={"team": "AUDIT", "role": "AUDITOR"}, headers=admin).json()
+    assert client.get(url, headers=hub["ivan"]).json()["access"]["roles"] == ["AUDITOR"]  # existing repository
+    new = _repo(client, hub, who="andy")
+    assert client.get(f"/api/doc-repos/{new['id']}", headers=hub["ivan"]).status_code == 200  # new repository
+    teams = client.get(f"{url}/members", headers=hub["ben"]).json()["team_grants"]
+    assert teams == [{"team": "AUDIT", "team_name": "Audit", "role": "AUDITOR", "from_default": True}]
+    # repository admins can't remove it; the platform admin can
+    assert client.delete(f"/api/default-grants/{grant['id']}", headers=hub["ben"]).status_code == 403
+    assert client.delete(f"/api/default-grants/{grant['id']}", headers=admin).status_code == 204
+    assert client.get(url, headers=hub["ivan"]).status_code == 403
+
+
+def test_team_membership_changes_apply_everywhere_at_once(client, hub):
+    admin = hub["admin"]
+    client.post("/api/default-grants", json={"team": "COMPLIANCE", "role": "VIEWER"}, headers=admin)
+    assert client.get(f"/api/doc-repos/{hub['repo']}", headers=hub["grace"]).status_code == 200
+    client.put("/api/teams/COMPLIANCE/members", json={"lan_ids": []}, headers=admin)
+    assert client.get(f"/api/doc-repos/{hub['repo']}", headers=hub["grace"]).status_code == 403
+
+
+def test_missing_repository(client, hub):
+    assert client.get("/api/doc-repos/01900000-0000-7000-8000-000000000000", headers=hub["ben"]).status_code == 404
+
+
+def test_members_list_their_user_groups_and_dates(client, hub):
+    body = client.get(f"/api/doc-repos/{hub['repo']}/members", headers=hub["ben"]).json()
+    ben = next(m for m in body["members"] if m["lan_id"] == "ben")
+    assert [(g["name"], g["roles"]) for g in ben["groups"]] == [("Users", ["OWNER"])]
+    assert ben["added_at"] and ben["updated_at"]
+
+
+def test_deleting_a_user_group_takes_away_the_roles_held_in_it(client, hub):
+    url = f"/api/doc-repos/{hub['repo']}"
+    groups = {g["name"]: g["id"] for g in client.get(f"{url}/groups", headers=hub["ben"]).json()["groups"]}
+    assert client.delete(f"{url}/groups/{groups['Makers']}", headers=hub["marcus"]).status_code == 403
+    assert client.delete(f"{url}/groups/{groups['Users']}", headers=hub["ben"]).status_code == 409  # the default
+    assert client.delete(f"{url}/groups/{groups['Makers']}", headers=hub["dana"]).status_code == 204
+    assert client.get(url, headers=hub["marcus"]).status_code == 403  # marcus was only a maker there
+    names = [g["name"] for g in client.get(f"{url}/groups", headers=hub["ben"]).json()["groups"]]
+    assert "Makers" not in names
+    assert client.post(f"{url}/groups", json={"name": "Makers"}, headers=hub["ben"]).status_code == 201  # name free again
+    assert "GROUP_DELETED" in [e["action"] for e in client.get("/api/audit", headers=hub["admin"]).json()["items"]]
+
+
+def test_deleting_the_checkers_group_empties_their_inboxes(client, hub):
+    from tests.approvals.test_approvals import inbox, submit
+    submit(client, hub)
+    url = f"/api/doc-repos/{hub['repo']}"
+    groups = {g["name"]: g["id"] for g in client.get(f"{url}/groups", headers=hub["ben"]).json()["groups"]}
+    assert len(inbox(client, hub, "cara")) == 1
+    client.delete(f"{url}/groups/{groups['Checkers']}", headers=hub["ben"])
+    assert inbox(client, hub, "cara") == [] and inbox(client, hub, "chris") == []
+
+
+def test_an_admin_cannot_remove_their_own_right_to_manage(client, hub):
+    url = f"/api/doc-repos/{hub['repo']}"
+    groups = {g["name"]: g["id"] for g in client.get(f"{url}/groups", headers=hub["ben"]).json()["groups"]}
+    r = client.delete(f"{url}/groups/{groups['Admins']}", headers=hub["dana"])  # dana's only admin role is there
+    assert r.status_code == 409 and "your own right to manage" in r.text
+    assert client.get(f"{url}/groups", headers=hub["dana"]).status_code == 200  # nothing changed
+    r = client.put(f"{url}/members/dana", json={"groups": [{"id": groups["Admins"], "roles": ["VIEWER"]}]},
+                   headers=hub["dana"])
+    assert r.status_code == 409
+    assert client.delete(f"{url}/groups/{groups['Admins']}", headers=hub["ben"]).status_code == 204  # the owner may

@@ -54,7 +54,8 @@ class Settings(BaseSettings):
     ldap_attribute_department: str = "department"
     ldap_attribute_title: str = "title"
 
-    # LAN IDs made system admins at start-up when nobody holds SYSTEM_ADMIN (how the first one gets in).
+    # LAN IDs made platform admins (ADMIN at the PLATFORM root) at start-up when there are none
+    # (how the first one gets in).
     bootstrap_system_admins: list[str] = ["admin"]
 
     # Document uploads (local disk for now). Files go under upload_dir/doc-repos/<doc-repo id>/.

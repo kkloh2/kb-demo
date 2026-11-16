@@ -1,0 +1,175 @@
+/* Approvals page. Builds on knowledge-bases.css, kb-detail.css, admin.css and doc-repos.css. */
+
+.approvals-table td {
+  vertical-align: middle;
+}
+
+/* ---------- Approval Workflows ---------- */
+.flow-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flow-step {
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface, #fff);
+}
+
+.flow-step__num {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--brand-red-050);
+  color: var(--brand-red-600);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+}
+
+.flow-step__body p {
+  margin: 4px 0 0;
+}
+
+.flow-step__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.flow-step__on {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px var(--sp-4);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+.flow-json {
+  width: 100%;
+  min-height: 280px;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+/* The editor's body scrolls; its footer (Check, Publish) stays in view. */
+.workflow-editor {
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+}
+
+/* Choosing a repository's workflow: one card per workflow. */
+.workflow-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.workflow-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.workflow-option:hover {
+  background: var(--gray-050);
+}
+
+.workflow-option--chosen {
+  border-color: var(--brand-red);
+  background: var(--brand-red-050);
+}
+
+.workflow-option input {
+  margin-top: 3px;
+  accent-color: var(--brand-red);
+}
+
+.workflow-option__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.workflow-option__name {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: 600;
+}
+
+.workflow-option__steps {
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
+
+/* A table cell whose text may wrap (e.g. a workflow's steps), in tables that otherwise don't. */
+.members-table td.cell-wrap {
+  white-space: normal;
+}
+
+/* A badge on its own in a table cell: no gap before it, so it lines up with the column heading. */
+.kb-badge.kb-badge--cell { /* beats .kb-badge whichever stylesheet loads last */
+  margin-left: 0;
+}
+
+/* ---------- Audit ---------- */
+.audit-what {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.audit-what__label {
+  font-weight: 600;
+}
+
+.audit-what__label--security {
+  color: var(--brand-red-600);
+}
+
+.audit-what__summary {
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
+
+.audit-details {
+  margin: 0;
+  padding: var(--sp-3);
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--gray-050);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.audit-more {
+  display: flex;
+  justify-content: center;
+  padding-top: var(--sp-4);
+}

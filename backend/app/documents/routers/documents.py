@@ -1,206 +1,171 @@
-"""Document endpoints (all inside one doc-repo).
+"""Document endpoints (inside one repository).
 
-    PUT    /api/doc-repos/{id}/repository-metadata         the department's admin        [{key, value}]: replace it
-    GET    /api/doc-repos/{id}/documents                   doc-repo role or dept admin    the documents the caller may see
-    POST   /api/doc-repos/{id}/documents                   doc-repo maker                 upload files / a folder (multipart)
-    GET    /api/doc-repos/{id}/documents/{doc}             doc-repo role or dept admin
-    GET    /api/doc-repos/{id}/documents/{doc}/download    doc-repo role or dept admin
-    PUT    /api/doc-repos/{id}/documents/{doc}/metadata    doc-repo maker                 drafts and rejected only
-    POST   /api/doc-repos/{id}/documents/submit            doc-repo maker                 {ids}: send for review
-    POST   /api/doc-repos/{id}/documents/review            doc-repo checker               {ids, decision, reason}
-    POST   /api/doc-repos/{id}/documents/delete            doc-repo maker                 {ids}: drafts and rejected only
+    GET  /api/doc-repos/{id}/documents                    docs.repository.view   the documents I may see
+    POST /api/doc-repos/{id}/documents                    docs.document.upload   upload files / a folder
+    GET  /api/doc-repos/{id}/documents/{doc}              docs.repository.view   (404 when hidden)
+    GET  /api/doc-repos/{id}/documents/{doc}/download     docs.repository.view
+    GET  /api/doc-repos/{id}/documents/{doc}/history      docs.repository.view   its approval requests and decisions
+    PUT  /api/doc-repos/{id}/documents/{doc}/metadata     docs.document.upload   not when pending or approved
+    POST /api/doc-repos/{id}/documents/submit             docs.document.upload   {ids}: send for approval
+    POST /api/doc-repos/{id}/documents/delete             docs.document.upload   {ids}: soft delete
+
+Decisions happen on the Approvals page (/api/approvals), never here.
 """
 
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, Path, UploadFile, status
 from fastapi.responses import FileResponse
 
+from app.access.authorization import Can
+from app.access.catalog import P
+from app.access.models import AppUser
+from app.approvals.router import history_out
+from app.approvals.schemas import RequestHistoryOut
+from app.audit import service as audit
 from app.auth.dependencies import CurrentUser
-from app.auth.identity import Principal
 from app.core.config import get_settings
 from app.core.errors import InvalidRequest
 from app.db.session import Db
 from app.documents import documents as docs
-from app.documents.authorization import DocRepoRoles
-from app.documents.models import Document
-from app.documents.routers.doc_repos import ANY_DOC_REPO_ROLE, DEPARTMENT_ADMIN, DocRepoId
+from app.documents import metadata
+from app.documents.models import DocRepo, Document
+from app.documents.routers.doc_repos import DocRepoId, at_repo, me, ref
 from app.documents.schemas import (
-    DepartmentMetadata,
     BulkOut,
+    DecisionRef,
     DocumentActionsOut,
     DocumentIds,
-    DocumentList,
     DocumentOut,
-    MetadataPair,
+    MetadataEntryOut,
     MetadataUpdate,
-    PersonRef,
-    ReviewIn,
     SkippedOut,
 )
-from app.documents.service import DocRepoAccess, get_doc_repo
-from app.users.service import get_by_lan_id
+from app.documents.service import RepoAccess
 
 router = APIRouter(tags=["documents"])
 
-DocumentId = Annotated[int, Path(ge=1, description="Document id")]
-_403 = {403: {"description": "Caller lacks the required role"}}
-_404 = {404: {"description": "No such doc-repo or document (or not visible to the caller)"}}
-
-# Who may read a doc-repo's documents: any doc-repo role, or the department's admin (a viewer).
-readers = DocRepoRoles(*ANY_DOC_REPO_ROLE, department_roles=DEPARTMENT_ADMIN)
+DocumentId = Annotated[uuid.UUID, Path(description="Document id")]
+readers = Can(P.REPO_VIEW, at=at_repo())
 
 
-def _person(user) -> PersonRef | None:
-    return PersonRef(lan_id=user.lan_id, display_name=user.display_name) if user else None
+def outs(db: Db, repo: DocRepo, items: list[Document], a: RepoAccess) -> list[DocumentOut]:
+    entries = metadata.entries(db, items, repo.node)
+    decisions = docs.decisions_for(db, items)
+    out = []
+    for d in items:
+        act = docs.actions_for(d, a)
+        dec = decisions.get(d.id)
+        out.append(DocumentOut(
+            id=d.id, doc_repo_id=d.doc_repo_id, folder=d.folder, filename=d.filename, content_type=d.content_type,
+            size_bytes=d.size_bytes, status=d.status, maker=ref(d.maker), created_at=d.created_at,
+            updated_at=d.updated_at, submitted_at=d.submitted_at,
+            last_decision=DecisionRef(decision=dec.decision, comment=dec.comment, decided_by=ref(dec.decided_by),
+                                      decided_at=dec.decided_at, round=dec.round) if dec else None,
+            metadata=[MetadataEntryOut(**e.__dict__) for e in entries.get(d.id, [])],
+            actions=DocumentActionsOut(edit=act.edit, submit=act.submit, delete=act.delete),
+        ))
+    return out
 
 
-def _doc_out(db: Db, doc: Document, access: DocRepoAccess, caller_id: int | None) -> DocumentOut:
-    a = docs.actions_for(doc, access, caller_id)
-    return DocumentOut(
-        id=doc.id, doc_repo_id=doc.doc_repo_id, folder=doc.folder, filename=doc.filename,
-        content_type=doc.content_type, size_bytes=doc.size_bytes, status=doc.status,
-        maker=_person(doc.maker), checker=_person(doc.checker),
-        created_at=doc.created_at, updated_at=doc.updated_at, submitted_at=doc.submitted_at,
-        decided_at=doc.decided_at, rejection_reason=doc.rejection_reason,
-        department_metadata=DepartmentMetadata(**doc.department_metadata),
-        department_overrides=doc.department_overrides,
-        repository_metadata={v.key: v.value for v in doc.values if v.source == "field"},
-        repository_overrides=docs.repository_overrides(doc, doc.doc_repo.repository_metadata),
-        extra={v.key: v.value for v in doc.values if v.source == "extra"},
-        ai_metadata=doc.ai_metadata,
-        actions=DocumentActionsOut(edit=a.edit, submit=a.submit, review=a.review, delete=a.delete),
-    )
+def _one(db: Db, user: AppUser, repo_id: uuid.UUID, doc_id: uuid.UUID) -> DocumentOut:
+    repo, doc, a = docs.get_document(db, user, repo_id, doc_id)
+    return outs(db, repo, [doc], a)[0]
 
 
-def _caller_id(db: Db, p: Principal) -> int | None:
-    user = get_by_lan_id(db, p.lan_id)
-    return user.id if user else None
+def _bulk(db: Db, user: AppUser, repo_id: uuid.UUID, result: docs.BulkResult, deleted: bool = False) -> BulkOut:
+    repo, _, a = docs.list_documents(db, user, repo_id)
+    return BulkOut(done=[] if deleted else outs(db, repo, result.done, a),
+                   skipped=[SkippedOut(id=s.document_id, filename=s.filename, reason=s.reason) for s in result.skipped])
 
 
-def _bulk_out(db: Db, p: Principal, doc_repo_id: int, result: docs.BulkResult, deleted: bool = False) -> BulkOut:
-    from app.documents.service import access_to, get_doc_repo
-
-    access = access_to(db, p, get_doc_repo(db, doc_repo_id))
-    caller = _caller_id(db, p)
-    return BulkOut(
-        done=[] if deleted else [_doc_out(db, d, access, caller) for d in result.done],
-        skipped=[SkippedOut(id=s.document_id, filename=s.filename, reason=s.reason) for s in result.skipped],
-    )
-
-
-# --------------------------------------------------------------------------- repository metadata
-
-
-@router.put("/doc-repos/{doc_repo_id}/repository-metadata", response_model=list[MetadataPair],
-            responses={**_403, **_404})
-@DocRepoRoles(department_roles=DEPARTMENT_ADMIN)
-def replace_repository_metadata(doc_repo_id: DocRepoId, body: list[MetadataPair], db: Db) -> list[MetadataPair]:
-    """Make the doc-repo's repository metadata exactly these key/value pairs, in this order. New
-    documents start with these values; a removed key's values stay on documents as the maker's own fields."""
-    pairs = docs.replace_repository_metadata(db, doc_repo_id, [(m.key, m.value) for m in body])
-    return [MetadataPair(**m) for m in pairs]
-
-
-# --------------------------------------------------------------------------- documents
-
-
-@router.get("/doc-repos/{doc_repo_id}/documents", response_model=DocumentList, responses={**_403, **_404})
+@router.get("/doc-repos/{doc_repo_id}/documents", response_model=list[DocumentOut])
 @readers
-def list_documents(doc_repo_id: DocRepoId, db: Db, p: CurrentUser) -> DocumentList:
-    """The documents the caller may see (makers: all; checkers: submitted ones; viewers and the
-    department admin: approved), with the doc-repo's repository metadata."""
-    items, access = docs.list_documents(db, p, doc_repo_id)
-    caller = _caller_id(db, p)
-    return DocumentList(
-        documents=[_doc_out(db, d, access, caller) for d in items],
-        repository_metadata=[MetadataPair(**m) for m in get_doc_repo(db, doc_repo_id).repository_metadata],
-    )
+def list_documents(doc_repo_id: DocRepoId, db: Db, p: CurrentUser) -> list[DocumentOut]:
+    """Makers and auditors see every status; checkers submitted ones; viewers, owners and admins approved ones."""
+    repo, items, a = docs.list_documents(db, me(db, p), doc_repo_id)
+    return outs(db, repo, items, a)
 
 
-@router.post(
-    "/doc-repos/{doc_repo_id}/documents",
-    status_code=status.HTTP_201_CREATED,
-    response_model=list[DocumentOut],
-    responses={**_403, **_404, 422: {"description": "A file's type, size or count isn't allowed"}},
-)
-@DocRepoRoles("MAKER")
+@router.post("/doc-repos/{doc_repo_id}/documents", response_model=list[DocumentOut],
+             status_code=status.HTTP_201_CREATED,
+             responses={422: {"description": "A file's type, size or count isn't allowed"}})
+@Can(P.DOC_UPLOAD, at=at_repo())
 async def upload_documents(
     doc_repo_id: DocRepoId,
     db: Db,
     p: CurrentUser,
     files: Annotated[list[UploadFile], File(description="The files")],
-    paths: Annotated[list[str] | None, Form(description="Relative path of each file in a folder upload, "
-                                                       "e.g. Policies/2026/report.pdf; same order as files")] = None,
+    paths: Annotated[list[str] | None, Form(description="Each file's path in a folder upload, same order")] = None,
 ) -> list[DocumentOut]:
-    """Upload files, or a folder (its structure is kept). Each becomes a draft with the doc-repo's
-    department metadata. All-or-nothing: one bad file and nothing is stored."""
+    """Upload files, or a folder (its structure is kept). Each becomes a draft with the repository's
+    metadata. All-or-nothing."""
     if paths is not None and len(paths) != len(files):
         raise InvalidRequest("Send one path per file, or none.")
     limit = get_settings().max_upload_mb * 1024 * 1024
     incoming = []
     for i, f in enumerate(files):
-        data = await f.read(limit + 1)  # one byte over the limit is enough to refuse it
+        data = await f.read(limit + 1)
         incoming.append(docs.IncomingFile(relative_path=paths[i] if paths else (f.filename or ""),
                                           content_type=f.content_type, data=data))
-    created = docs.upload(db, p, doc_repo_id, incoming)
-    items, access = docs.list_documents(db, p, doc_repo_id)
-    by_id = {d.id: d for d in items}
-    caller = _caller_id(db, p)
-    return [_doc_out(db, by_id[d.id], access, caller) for d in created]
+    user = me(db, p)
+    created = docs.upload(db, user, doc_repo_id, incoming)
+    repo, _, a = docs.list_documents(db, user, doc_repo_id)
+    return outs(db, repo, created, a)
 
 
-@router.get("/doc-repos/{doc_repo_id}/documents/{document_id}", response_model=DocumentOut, responses={**_403, **_404})
+@router.get("/doc-repos/{doc_repo_id}/documents/{document_id}", response_model=DocumentOut)
 @readers
 def get_document(doc_repo_id: DocRepoId, document_id: DocumentId, db: Db, p: CurrentUser) -> DocumentOut:
-    doc, access = docs.get_document(db, p, doc_repo_id, document_id)
-    return _doc_out(db, doc, access, _caller_id(db, p))
+    return _one(db, me(db, p), doc_repo_id, document_id)
 
 
-@router.get("/doc-repos/{doc_repo_id}/documents/{document_id}/download", response_class=FileResponse,
-            responses={**_403, **_404})
+@router.get("/doc-repos/{doc_repo_id}/documents/{document_id}/download", response_class=FileResponse)
 @readers
-def download_document(doc_repo_id: DocRepoId, document_id: DocumentId, db: Db, p: CurrentUser) -> FileResponse:
-    doc, _ = docs.get_document(db, p, doc_repo_id, document_id)
-    return FileResponse(docs.file_path(doc), filename=doc.filename,
-                        media_type=doc.content_type or "application/octet-stream")
+def download(doc_repo_id: DocRepoId, document_id: DocumentId, db: Db, p: CurrentUser) -> FileResponse:
+    user = me(db, p)
+    repo, doc, _ = docs.get_document(db, user, doc_repo_id, document_id)
+    path = docs.file_path(doc)
+    audit.record(db, "DOCUMENT_DOWNLOADED", actor=user, target=("document", doc.id), node_id=repo.hierarchy_node_id,
+                 details={"filename": doc.filename})
+    db.commit()
+    return FileResponse(path, filename=doc.filename, media_type=doc.content_type or "application/octet-stream")
 
 
-@router.put(
-    "/doc-repos/{doc_repo_id}/documents/{document_id}/metadata",
-    response_model=DocumentOut,
-    responses={**_403, **_404, 409: {"description": "Not a draft or rejected document"}},
-)
-@DocRepoRoles("MAKER")
+@router.get("/doc-repos/{doc_repo_id}/documents/{document_id}/history", response_model=list[RequestHistoryOut])
+@readers
+def document_history(doc_repo_id: DocRepoId, document_id: DocumentId, db: Db, p: CurrentUser) -> list[RequestHistoryOut]:
+    """Every approval request for the document, newest first, with each round's decisions."""
+    _, doc, _ = docs.get_document(db, me(db, p), doc_repo_id, document_id)
+    return history_out(docs.history(db, doc))
+
+
+@router.put("/doc-repos/{doc_repo_id}/documents/{document_id}/metadata", response_model=DocumentOut,
+            responses={409: {"description": "Pending or approved: locked"}})
+@Can(P.DOC_UPLOAD, at=at_repo())
 def update_metadata(doc_repo_id: DocRepoId, document_id: DocumentId, body: MetadataUpdate, db: Db,
                     p: CurrentUser) -> DocumentOut:
-    """Replace the document's metadata: department metadata and repository metadata (both start from
-    the doc-repo's), and extra fields the maker adds."""
-    doc = docs.update_metadata(db, p, doc_repo_id, document_id,
-                               docs.MetadataIn(department_metadata=body.department_metadata.model_dump(), repository_metadata=body.repository_metadata, extra=body.extra))
-    _, access = docs.get_document(db, p, doc_repo_id, document_id)
-    return _doc_out(db, doc, access, _caller_id(db, p))
+    """Keep, override or remove each repository field, and set the document's own fields."""
+    user = me(db, p)
+    docs.update_metadata(db, user, doc_repo_id, document_id,
+                         {c.field_id: (c.state, c.value) for c in body.inherited},
+                         [(m.label, m.value) for m in body.own])
+    return _one(db, user, doc_repo_id, document_id)
 
 
-@router.post("/doc-repos/{doc_repo_id}/documents/submit", response_model=BulkOut, responses={**_403, **_404})
-@DocRepoRoles("MAKER")
+@router.post("/doc-repos/{doc_repo_id}/documents/submit", response_model=BulkOut)
+@Can(P.DOC_UPLOAD, at=at_repo())
 def submit_documents(doc_repo_id: DocRepoId, body: DocumentIds, db: Db, p: CurrentUser) -> BulkOut:
-    """Send documents for review. Any that can't go are skipped, with the reason."""
-    return _bulk_out(db, p, doc_repo_id, docs.submit(db, p, doc_repo_id, body.ids))
+    """Send documents for approval; they appear on the repository checkers' Approvals page."""
+    user = me(db, p)
+    return _bulk(db, user, doc_repo_id, docs.submit(db, user, doc_repo_id, body.ids))
 
 
-@router.post("/doc-repos/{doc_repo_id}/documents/review", response_model=BulkOut, responses={**_403, **_404})
-@DocRepoRoles("CHECKER")
-def review_documents(doc_repo_id: DocRepoId, body: ReviewIn, db: Db, p: CurrentUser) -> BulkOut:
-    """Approve, or reject with a reason, pending documents. Any that can't be decided are skipped."""
-    if body.decision not in ("approve", "reject"):
-        raise InvalidRequest("decision is approve or reject.")
-    result = docs.review(db, p, doc_repo_id, body.ids, approve=body.decision == "approve", reason=body.reason)
-    return _bulk_out(db, p, doc_repo_id, result)
-
-
-@router.post("/doc-repos/{doc_repo_id}/documents/delete", response_model=BulkOut, responses={**_403, **_404})
-@DocRepoRoles("MAKER")
+@router.post("/doc-repos/{doc_repo_id}/documents/delete", response_model=BulkOut)
+@Can(P.DOC_UPLOAD, at=at_repo())
 def delete_documents(doc_repo_id: DocRepoId, body: DocumentIds, db: Db, p: CurrentUser) -> BulkOut:
-    """Delete drafts and rejected documents. Others are skipped."""
-    return _bulk_out(db, p, doc_repo_id, docs.delete_documents(db, p, doc_repo_id, body.ids), deleted=True)
+    """Delete drafts, rejected and changes-requested documents (kept, hidden). Others are skipped."""
+    user = me(db, p)
+    return _bulk(db, user, doc_repo_id, docs.delete_documents(db, user, doc_repo_id, body.ids), deleted=True)
+

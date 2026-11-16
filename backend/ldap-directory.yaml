@@ -6,22 +6,23 @@
 # Keys are LAN IDs (lower-case). Each user needs: password, display_name, email, department, title.
 # Edits take effect at the next sign-in; no restart needed.
 #
-# The directory only says who someone is. What they may do in Data Hub (system roles, department
-# roles, doc-repo roles) is given in Data Hub itself: Administration -> Users, or a doc-repo's
-# Members tab. The "intended role" comments below are the demo set-up each user is meant for.
+# The directory only says who someone is. What they may do in Data Hub is given in Data Hub itself:
+# platform admins use Administration (users, system admins, teams); a repository's owner and admins
+# use its Members tab. The "intended role" comments below are the demo set-up each user is meant for.
+# Everyone who signs in can use Data Hub and see the list of repositories.
 #
 # Passwords: admin123 (admin), datahub123 (analyst), demo123 (everyone else).
 
 users:
   # ---------------------------------------------------------------- Technology
-  admin:  # intended role: system admin (seeded at start-up: bootstrap_system_admins)
+  admin:  # intended role: platform admin (seeded at start-up: bootstrap_system_admins)
     password: admin123
-    display_name: Data Hub Admin
-    email: admin@datahub.local
+    display_name: Sarah Koh
+    email: sarah.koh@datahub.local
     department: Technology
     title: Platform Administrator
 
-  it.admin:  # intended role: a second system admin (so one system admin can manage the other)
+  it.admin:  # intended role: a second platform admin (Administration -> Users -> Platform admin)
     password: demo123
     display_name: Ivan Teo
     email: ivan.teo@datahub.local
@@ -29,35 +30,42 @@ users:
     title: IT Administrator
 
   # ---------------------------------------------------------------- Risk Management (RISK)
-  risk.admin:  # intended role: RISK department admin (creates RISK doc-repos, gives doc-repo roles)
+  risk.admin:  # intended role: Doc Hub admin (Administration -> System admins); creates and owns repositories
     password: demo123
     display_name: Rita Lim
     email: rita.lim@datahub.local
     department: Risk Management
     title: Head of Risk Policy
 
-  risk.maker:  # intended role: RISK maker (uploads documents)
+  risk.maker:  # intended role: MAKER in a risk repository (uploads and submits documents)
     password: demo123
     display_name: Marcus Lee
     email: marcus.lee@datahub.local
     department: Risk Management
     title: Credit Risk Analyst
 
-  risk.checker:  # intended role: RISK checker (approves or rejects)
+  risk.checker:  # intended role: CHECKER in a risk repository (decides on the Approvals page)
     password: demo123
     display_name: Chloe Wong
     email: chloe.wong@datahub.local
     department: Risk Management
     title: Credit Risk Manager
 
-  risk.viewer:  # intended role: RISK viewer (sees RISK's doc-repo list)
+  risk.checker.2:  # intended role: a second CHECKER in a risk repository (either checker can decide)
+    password: demo123
+    display_name: Nadia Rahman
+    email: nadia.rahman@datahub.local
+    department: Risk Management
+    title: Senior Credit Risk Manager
+
+  risk.viewer:  # intended role: VIEWER in a risk repository (sees approved documents)
     password: demo123
     display_name: Victor Ng
     email: victor.ng@datahub.local
     department: Risk Management
     title: Risk Associate
 
-  analyst:  # intended role: RISK viewer
+  analyst:  # intended role: none (sees the list of repositories only)
     password: datahub123
     display_name: Alex Tan
     email: alex.tan@datahub.local
@@ -65,28 +73,28 @@ users:
     title: Data Analyst
 
   # ---------------------------------------------------------------- Human Resources (HR)
-  hr.admin:  # intended role: HR department admin
+  hr.admin:  # intended role: a second Doc Hub admin (can't manage the risk admin's repositories)
     password: demo123
     display_name: Hari Kumar
     email: hari.kumar@datahub.local
     department: Human Resources
     title: HR Business Partner Lead
 
-  hr.maker:  # intended role: HR maker
+  hr.maker:  # intended role: MAKER in an HR repository
     password: demo123
     display_name: Mei Ling Chua
     email: meiling.chua@datahub.local
     department: Human Resources
     title: HR Executive
 
-  hr.checker:  # intended role: HR checker
+  hr.checker:  # intended role: CHECKER in an HR repository
     password: demo123
     display_name: Daniel Ong
     email: daniel.ong@datahub.local
     department: Human Resources
     title: HR Manager
 
-  hr.viewer:  # intended role: HR viewer
+  hr.viewer:  # intended role: VIEWER in an HR repository
     password: demo123
     display_name: Priya Nair
     email: priya.nair@datahub.local
@@ -94,7 +102,7 @@ users:
     title: HR Associate
 
   # ---------------------------------------------------------------- Operations (no Data Hub department yet)
-  ops.analyst:  # intended role: none by default; for testing access to another department's doc-repo
+  ops.analyst:  # intended role: AUDIT team member (Administration -> Teams), an auditor of every repository
     password: demo123
     display_name: Omar Ismail
     email: omar.ismail@datahub.local

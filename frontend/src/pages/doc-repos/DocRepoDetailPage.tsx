@@ -1,33 +1,34 @@
 import { useCallback, useEffect, useState } from "react";
+import { getDocRepo, type DocRepo } from "../../api/doc-repos";
 import { ApiError } from "../../api/http";
-import { DEPARTMENT_METADATA_KEYS, DEPARTMENT_METADATA_LABELS, DOC_REPO_ROLE_NAMES, getDocRepo, type DocRepo } from "../../api/doc-repos";
-import { ChevronIcon, EditIcon, FolderIcon } from "../../components/Icons";
-import { Modal } from "../../components/Modal";
+import { ChevronIcon, FolderIcon } from "../../components/Icons";
 import { timeAgo } from "../../lib/time";
 import { DocumentsTab } from "./DocumentsTab";
-import { RepositoryMetadataPanel } from "./RepositoryMetadataPanel";
+import { ActivityTab } from "./ActivityTab";
+import { GroupsTab } from "./GroupsTab";
+import { WorkflowTab } from "./WorkflowTab";
 import { MembersTab } from "./MembersTab";
-import { DocRepoForm } from "./DocRepoForm";
+import { RepositoryMetadataPanel } from "./RepositoryMetadataPanel";
 import "../../styles/knowledge-bases.css";
 import "../../styles/admin.css";
 import "../../styles/kb-detail.css";
 import "../../styles/doc-repos.css";
+import { MessageBar } from "../../components/MessageBar";
 
-type Tab = "documents" | "metadata" | "members";
+type Tab = "documents" | "metadata" | "members" | "groups" | "workflow" | "activity";
 
 interface Props {
   token: string;
-  docRepoId: number;
+  docRepoId: string;
   onBack: () => void;
   onSessionEnded: (message: string) => void;
 }
 
-/** One doc-repo: its documents, department metadata, and members (department admins). */
+/** One repository: its documents, its metadata fields, and (owner and admins) its members and user groups. */
 export function DocRepoDetailPage({ token, docRepoId, onBack, onSessionEnded }: Props) {
   const [docRepo, setDocRepo] = useState<DocRepo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("documents");
-  const [editing, setEditing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [docCount, setDocCount] = useState<number | null>(null);
 
@@ -67,7 +68,11 @@ export function DocRepoDetailPage({ token, docRepoId, onBack, onSessionEnded }: 
   const tabs: { key: Tab; label: string }[] = [
     { key: "documents", label: docCount === null ? "Documents" : `Documents (${docCount})` },
     { key: "metadata", label: "Metadata" },
-    ...(access.manage ? [{ key: "members" as Tab, label: "Members" }] : []),
+    ...(access.manage_members
+      ? [{ key: "members" as Tab, label: "Users" }, { key: "groups" as Tab, label: "User groups" }]
+      : []),
+    ...(access.edit ? [{ key: "workflow" as Tab, label: "Workflow" }] : []),
+    ...(access.activity ? [{ key: "activity" as Tab, label: "Activity" }] : []),
   ];
 
   return (
@@ -83,21 +88,12 @@ export function DocRepoDetailPage({ token, docRepoId, onBack, onSessionEnded }: 
         </div>
         {docRepo.description && <p className="kb-head__desc">{docRepo.description}</p>}
         <p className="kb-head__meta">
-          <span className="badge">{docRepo.department.name}</span>
-          {access.manage && <span className="badge badge--neutral">Department admin</span>}
-          {access.doc_repo_roles.map((r) => (
-            <span key={r} className="badge badge--neutral">
-              {DOC_REPO_ROLE_NAMES[r]}
-            </span>
-          ))}
           <span className="muted">Updated {timeAgo(docRepo.updated_at)}</span>
         </p>
       </header>
 
       {notice && (
-        <p className="notice" role="status">
-          {notice}
-        </p>
+        <MessageBar onClose={() => setNotice(null)}>{notice}</MessageBar>
       )}
 
       <div className="tabs" role="tablist" aria-label="Repository">
@@ -113,62 +109,23 @@ export function DocRepoDetailPage({ token, docRepoId, onBack, onSessionEnded }: 
         {tab === "documents" && (
           <DocumentsTab token={token} docRepo={docRepo} onSessionEnded={onSessionEnded} onCountChange={setDocCount} />
         )}
-
         {tab === "metadata" && (
-          <section className="panel" aria-labelledby="metadata-title">
-            <div className="panel__head">
-              <div>
-                <h2 id="metadata-title" className="panel__title">
-                  Department metadata
-                </h2>
-                <p className="panel__desc">
-                  Every document in this repository starts with these values. A maker can override them per document.
-                </p>
-              </div>
-              {access.manage && (
-                <button type="button" className="btn-secondary" onClick={() => setEditing(true)}>
-                  <EditIcon />
-                  Edit
-                </button>
-              )}
-            </div>
-            <dl className="meta-list">
-              {DEPARTMENT_METADATA_KEYS.map((k) => (
-                <div key={k} className="meta-list__row">
-                  <dt>{DEPARTMENT_METADATA_LABELS[k]}</dt>
-                  <dd>{docRepo.department_metadata[k] || <span className="muted">Not set</span>}</dd>
-                </div>
-              ))}
-            </dl>
-          </section>
+          <RepositoryMetadataPanel token={token} docRepoId={docRepo.id} pairs={docRepo.metadata} canEdit={access.edit}
+            onSessionEnded={onSessionEnded} onSaved={(pairs) => setDocRepo((r) => r && { ...r, metadata: pairs })} />
         )}
-
-        {tab === "metadata" && (
-          <RepositoryMetadataPanel token={token} docRepoId={docRepo.id} pairs={docRepo.repository_metadata}
-            canEdit={access.manage} onSessionEnded={onSessionEnded}
-            onSaved={(pairs) => setDocRepo((r) => r && { ...r, repository_metadata: pairs })} />
-        )}
-
-        {tab === "members" && access.manage && (
+        {tab === "members" && access.manage_members && (
           <MembersTab token={token} docRepo={docRepo} onSessionEnded={onSessionEnded} />
         )}
-      </div>
-
-      <Modal open={editing} title={`Edit ${docRepo.name}`} onClose={() => setEditing(false)}>
-        {editing && (
-          <DocRepoForm
-            token={token}
-            existing={docRepo}
-            onCancel={() => setEditing(false)}
-            onSaved={(p) => {
-              setEditing(false);
-              setDocRepo(p);
-              setNotice(`Saved ${p.name}.`);
-            }}
-            onSessionEnded={onSessionEnded}
-          />
+        {tab === "groups" && access.manage_members && (
+          <GroupsTab token={token} docRepo={docRepo} onSessionEnded={onSessionEnded} />
         )}
-      </Modal>
+        {tab === "workflow" && access.edit && (
+          <WorkflowTab token={token} docRepo={docRepo} onSessionEnded={onSessionEnded} />
+        )}
+        {tab === "activity" && access.activity && (
+          <ActivityTab token={token} docRepo={docRepo} onSessionEnded={onSessionEnded} />
+        )}
+      </div>
     </div>
   );
 }

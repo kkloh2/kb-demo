@@ -310,3 +310,83 @@
   align-items: center;
   gap: var(--sp-2);
 }
+
+/* Neutral information (not success, not error), e.g. "waiting for a checker". */
+.notice--info {
+  border-color: var(--border-strong);
+  background: var(--gray-050);
+  color: var(--text-secondary);
+}
+
+/* A metadata field's state on a document: inherited, changed, removed. */
+.meta-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-2);
+  align-items: end;
+}
+
+.meta-row__actions {
+  display: flex;
+  gap: var(--sp-1);
+  padding-bottom: 6px;
+}
+
+.meta-row--removed input {
+  text-decoration: line-through;
+  color: var(--text-secondary);
+}
+
+/* A document's approval history. */
+.history {
+  font-size: var(--fs-sm);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.history__item {
+  border-left: 3px solid var(--border-strong);
+  padding: 2px 0 2px var(--sp-3);
+}
+
+.history__item--APPROVED { border-left-color: #1e6b34; }
+.history__item--REJECTED { border-left-color: var(--brand-red); }
+.history__item--CHANGES_REQUESTED { border-left-color: #1f4e8c; }
+
+.history__comment {
+  margin: 2px 0 0;
+  color: var(--text-secondary);
+}
+
+.status--changes_requested {
+  background: #e8f0fb;
+  color: #1f4e8c;
+}
+
+/* Icon buttons side by side in a table row (repository metadata). */
+.row-actions .kb-icon-btn {
+  display: inline-grid;
+  vertical-align: middle;
+}
+
+/* Role labels in a row, wrapping (user groups). */
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* One tick box per user group, stacked (repository Members form). */
+.group-picks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* Keeps a row's icons lined up with rows that have one more (e.g. no delete for the default group). */
+.kb-icon-btn--spacer {
+  visibility: hidden;
+}

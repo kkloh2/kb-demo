@@ -4,21 +4,17 @@ import {
   downloadDocument,
   formatSize,
   listDocuments,
-  reviewDocuments,
   STATUS_LABEL,
   submitDocuments,
   uploadDocuments,
   type BulkResult,
   type DocumentStatus,
-  type MetadataPair,
   type DocRepoDocument,
 } from "../../api/documents";
 import { ApiError } from "../../api/http";
 import type { DocRepo } from "../../api/doc-repos";
 import {
-  CheckIcon,
   ChevronIcon,
-  CloseIcon,
   DownloadIcon,
   FileIcon,
   FolderIcon,
@@ -33,6 +29,7 @@ import { Modal } from "../../components/Modal";
 import { Pager, usePagination } from "../../components/Pager";
 import { timeAgo } from "../../lib/time";
 import { DocumentPanel } from "./DocumentPanel";
+import { MessageBar } from "../../components/MessageBar";
 
 // Must match the server's allowed_upload_extensions; anything else in a folder is left out.
 const ALLOWED = [".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".csv", ".txt", ".md"];
@@ -47,17 +44,16 @@ interface Props {
   onCountChange?: (count: number) => void;
 }
 
-/** The doc-repo's documents, browsable by folder, with upload, and submit / review / delete per document. */
+/** The repository's documents, browsable by folder, with upload, and submit / delete per document.
+ * Decisions happen on the Approvals page. */
 export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: Props) {
   const { access } = docRepo;
   const [docs, setDocs] = useState<DocRepoDocument[] | null>(null);
-  const [repoPairs, setRepoPairs] = useState<MetadataPair[]>([]);
   const [folder, setFolder] = useState("");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
-  const [openId, setOpenId] = useState<number | null>(null);
-  const [rejecting, setRejecting] = useState<number[] | null>(null);
-  const [deleting, setDeleting] = useState<number[] | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
   const filesInput = useRef<HTMLInputElement>(null);
@@ -74,9 +70,8 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
   const load = useCallback(() => {
     listDocuments(token, docRepo.id)
       .then((r) => {
-        setDocs(r.documents);
-        setRepoPairs(r.repository_metadata);
-        onCountChange?.(r.documents.length);
+        setDocs(r);
+        onCountChange?.(r.length);
       })
       .catch(fail);
   }, [token, docRepo.id, fail, onCountChange]);
@@ -97,7 +92,7 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
         (!q ||
           d.filename.toLowerCase().includes(q) ||
           d.folder.toLowerCase().includes(q) ||
-          Object.values({ ...d.repository_metadata, ...d.extra, ...d.department_metadata }).some((v) => String(v ?? "").toLowerCase().includes(q))),
+          d.metadata.some((m) => (m.value ?? "").toLowerCase().includes(q))),
     );
   }, [docs, query, status]);
 
@@ -168,7 +163,7 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
         text:
           `Uploaded ${created.length} file${created.length === 1 ? "" : "s"} as drafts. ` +
           (left ? `Left out ${left} (hidden, empty or not an allowed type). ` : "") +
-          "Open each to check its metadata, then submit for review.",
+          "Open each to check its metadata, then submit it for approval.",
       });
       load();
     } catch (e) {
@@ -182,34 +177,17 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
     { label: "Open", icon: <FileIcon />, onSelect: () => setOpenId(d.id) },
     { label: "Download", icon: <DownloadIcon />, onSelect: () => downloadDocument(token, d).catch(fail) },
     ...(d.actions.submit
-      ? [{ label: "Submit for review", icon: <UploadIcon />, onSelect: () => run("submit", () => submitDocuments(token, docRepo.id, [d.id]), "Submitted") }]
-      : []),
-    ...(d.actions.review
-      ? [
-          { label: "Approve", icon: <CheckIcon />, onSelect: () => run("approve", () => reviewDocuments(token, docRepo.id, [d.id], "approve"), "Approved") },
-          { label: "Reject…", icon: <CloseIcon />, danger: true, onSelect: () => setRejecting([d.id]) },
-        ]
+      ? [{ label: "Submit for approval", icon: <UploadIcon />, onSelect: () => run("submit", () => submitDocuments(token, docRepo.id, [d.id]), "Submitted") }]
       : []),
     ...(d.actions.delete ? [{ label: "Delete…", icon: <TrashIcon />, danger: true, onSelect: () => setDeleting([d.id]) }] : []),
   ];
 
   // ---------------------------------------------------------------- render
-  if (!access.view_documents) {
-    return (
-      <div className="kb-table-panel">
-        <p className="kb-message">
-          You can see this repository, but not its documents. Ask a department admin of {docRepo.department.name} for a
-          role in it.
-        </p>
-      </div>
-    );
-  }
-
   const crumbs = folder ? folder.split("/") : [];
-  const statusOptions: StatusFilter[] = access.upload
-    ? ["all", "draft", "pending_approval", "approved", "rejected"]
-    : access.review
-      ? ["all", "pending_approval", "approved", "rejected"]
+  const statusOptions: StatusFilter[] = access.upload || access.roles.includes("AUDITOR")
+    ? ["all", "draft", "pending_approval", "changes_requested", "approved", "rejected"]
+    : access.roles.includes("CHECKER")
+      ? ["all", "pending_approval", "changes_requested", "approved", "rejected"]
       : [];
 
   return (
@@ -218,7 +196,7 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
         <div className="toolbar__left">
           <label className="search">
             <SearchIcon />
-            <input type="search" placeholder="Search names and metadata…" value={query}
+            <input type="search" placeholder="Search documents" value={query}
               onChange={(e) => setQuery(e.target.value)} aria-label="Search documents" />
           </label>
           {statusOptions.length > 0 && (
@@ -260,9 +238,9 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
       </div>
 
       {notice && (
-        <p className={notice.kind === "ok" ? "notice" : "notice notice--error"} role="status">
+        <MessageBar className={notice.kind === "ok" ? "notice" : "notice notice--error"} onClose={() => setNotice(null)}>
           {notice.text}
-        </p>
+        </MessageBar>
       )}
 
       {!searching && (
@@ -355,7 +333,7 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
                       </button>
                     </td>
                     <td>
-                      <span className={`status status--${d.status}`} title={d.rejection_reason ?? undefined}>
+                      <span className={`status status--${d.status}`} title={d.last_decision?.comment ?? undefined}>
                         {STATUS_LABEL[d.status]}
                       </span>
                     </td>
@@ -387,8 +365,6 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
             token={token}
             docRepoId={docRepo.id}
             documentId={openId}
-            repoPairs={repoPairs}
-            repoDefaults={docRepo.department_metadata}
             onClose={() => setOpenId(null)}
             onChanged={(message) => {
               if (message) setNotice({ kind: "ok", text: message });
@@ -399,26 +375,13 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
         )}
       </Modal>
 
-      <Modal open={rejecting !== null} title="Reject" onClose={() => setRejecting(null)}>
-        {rejecting && (
-          <RejectForm
-            count={rejecting.length}
-            onCancel={() => setRejecting(null)}
-            onReject={(reason) => {
-              const ids = rejecting;
-              setRejecting(null);
-              return run("reject", () => reviewDocuments(token, docRepo.id, ids, "reject", reason), "Rejected");
-            }}
-          />
-        )}
-      </Modal>
-
       <Modal open={deleting !== null} title="Delete document" onClose={() => setDeleting(null)}>
         {deleting && (
           <>
             <div className="modal__body">
               <p className="modal__text">
-                Delete this document and its stored file? This can't be undone.
+                Delete this document? It disappears from the repository and any request for its approval is withdrawn.
+                It's kept on record.
               </p>
             </div>
             <div className="modal__footer">
@@ -440,33 +403,8 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
   );
 }
 
-function RejectForm({ count, onCancel, onReject }: { count: number; onCancel: () => void; onReject: (reason: string) => void }) {
-  const [reason, setReason] = useState("");
-  return (
-    <form onSubmit={(e) => { e.preventDefault(); if (reason.trim()) onReject(reason.trim()); }}>
-      <div className="modal__body">
-        <label className="form-field">
-          <span>Reason</span>
-          <textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} required autoFocus
-            placeholder="What the maker needs to fix" />
-          <small>
-            {count === 1 ? "The document goes" : `The ${count} documents go`} back to the maker with this reason.
-          </small>
-        </label>
-      </div>
-      <div className="modal__footer">
-        <button type="button" className="btn-secondary" onClick={onCancel}>
-          Cancel
-        </button>
-        <button type="submit" className="btn-danger" disabled={!reason.trim()}>
-          Reject
-        </button>
-      </div>
-    </form>
-  );
-}
-
-function extKind(name: string): string {
+/** A file's kind from its name, for the coloured file icon (doc-name__icon--<kind>). */
+export function extKind(name: string): string {
   const ext = name.slice(name.lastIndexOf(".") + 1).toLowerCase();
   if (ext === "pdf") return "pdf";
   if (ext === "doc" || ext === "docx") return "doc";

@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { login, type LoginResponse } from "../api/auth";
+import { MessageBar } from "../components/MessageBar";
 import { OcbcLogo } from "../components/OcbcLogo";
 import "../styles/login.css";
 
@@ -45,9 +46,10 @@ export function LoginPage({ notice, onSuccess }: Props) {
 
         <form onSubmit={handleSubmit} noValidate>
           {message && (
-            <div className={error ? "alert" : "alert alert--info"} role={error ? "alert" : "status"}>
+            <MessageBar key={message} className={error ? "alert" : "alert alert--info"} role={error ? "alert" : "status"}
+              onClose={error ? () => setError(null) : undefined}>
               {message}
-            </div>
+            </MessageBar>
           )}
 
           <div className="field">

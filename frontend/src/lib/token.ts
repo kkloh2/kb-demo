@@ -1,12 +1,11 @@
 /**
- * Reads the claims in the access token, to decide what the UI shows (e.g. the Administration
- * entry). Never a security check: the server verifies the token and the roles on every request.
+ * Reads the claims in the access token. Never a security check: the server verifies the token and
+ * checks permissions on every request. Pages use GET /api/me/access for what to show.
  */
 
 export interface TokenClaims {
   sub?: string;
-  system_roles?: string[];
-  org_unit_roles?: Record<string, string[]>; // department code -> roles
+  system_roles?: Record<string, string[]>; // roles at each system's root, e.g. {"DOC_HUB": ["VIEWER"]}
 }
 
 export function tokenClaims(token: string): TokenClaims {
@@ -19,5 +18,3 @@ export function tokenClaims(token: string): TokenClaims {
     return {};
   }
 }
-
-export const isSystemAdmin = (token: string) => (tokenClaims(token).system_roles ?? []).includes("SYSTEM_ADMIN");

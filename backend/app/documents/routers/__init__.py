@@ -1,12 +1,8 @@
-"""The documents module's HTTP endpoints, combined into `router` for app.main.
-
-    doc_repos.py   /api/doc-repos, /api/departments/{code}/doc-repos
-    documents.py  /api/doc-repos/{id}/fields, /api/doc-repos/{id}/documents...
-"""
+"""Doc Hub endpoints, combined into `router` for app.main."""
 
 from fastapi import APIRouter
 
-from app.documents.routers import documents, doc_repos
+from app.documents.routers import doc_repos, documents
 
 router = APIRouter()
 router.include_router(doc_repos.router)

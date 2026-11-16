@@ -1,146 +1,134 @@
-"""Doc-repos, their members, and their documents."""
+"""Doc Hub: document repositories, their documents, and metadata.
 
+A repository is a DOC_REPO node in the DOC_HUB tree (its name, members and deletion live there);
+doc_repo holds what only repositories have.
+
+Metadata is one model for every level. A field is defined at a node (and applies to the
+documents below it) or on one document. A value is set at a node or on a document. Each document
+carries its own copy of every inherited value (source INHERITED), kept up to date while the
+document isn't approved and frozen once it is, so a search is one simple query and an approved
+document's record matches what was checked.
+"""
+
+import uuid
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
 
-from sqlalchemy import JSON, CheckConstraint, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, UTCDateTime, utcnow
-from app.users.models import Department, User
-
-
-class DocRepoRole(StrEnum):
-    MAKER = "MAKER"  # uploads documents
-    CHECKER = "CHECKER"  # approves or rejects them
-    VIEWER = "VIEWER"  # sees approved documents
-
-
-DOC_REPO_ROLE_ORDER = [DocRepoRole.MAKER, DocRepoRole.CHECKER, DocRepoRole.VIEWER]
+from app.access.models import AppUser, HierarchyNode
+from app.db.base import Base, UTCDateTime, utcnow, uuid7
 
 
 class DocRepo(Base):
-    """A department's logical group of documents, with the department metadata its documents share."""
+    __tablename__ = "doc_repo"
 
-    __tablename__ = "doc_repos"
-    __table_args__ = (UniqueConstraint("department_id", "name", name="uq_doc_repos_department_name"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    # RESTRICT: a department with doc-repos can't be deleted until its doc-repos are.
-    department_id: Mapped[int] = mapped_column(ForeignKey("departments.id", ondelete="RESTRICT"), index=True)
-    name: Mapped[str] = mapped_column(String(128))
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
+    hierarchy_node_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("hierarchy_node.id"), unique=True)
     description: Mapped[str] = mapped_column(Text, default="")
-    # Department metadata ({key: value} for DEPARTMENT_METADATA_KEYS), copied onto each document;
-    # a maker can override it per document.
-    department_metadata: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
-    # Repository metadata: [{"key": ..., "value": ...}] in order, plain text, set by the department
-    # admin. Each document starts with these values; a maker can change them per document.
-    repository_metadata: Mapped[list[dict[str, str]]] = mapped_column(JSON, default=list)
-    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
 
-    department: Mapped[Department] = relationship()
-    created_by: Mapped[User | None] = relationship(foreign_keys=[created_by_id])
-    members: Mapped[list["DocRepoMember"]] = relationship(back_populates="doc_repo", cascade="all, delete-orphan")
-
-
-class DocRepoMember(Base):
-    """A doc-repo role held by a user, given by the department's admin."""
-
-    __tablename__ = "doc_repo_members"
-    __table_args__ = (CheckConstraint("role IN ('MAKER', 'CHECKER', 'VIEWER')", name="ck_doc_repo_members_role"),)
-
-    doc_repo_id: Mapped[int] = mapped_column(ForeignKey("doc_repos.id", ondelete="CASCADE"), primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    role: Mapped[str] = mapped_column(String(16), primary_key=True)
-    granted_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    granted_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
-
-    doc_repo: Mapped[DocRepo] = relationship(back_populates="members")
-    user: Mapped[User] = relationship(foreign_keys=[user_id])
-
-
-# --------------------------------------------------------------------------- documents
+    node: Mapped[HierarchyNode] = relationship()
+    created_by: Mapped[AppUser | None] = relationship()
 
 
 class DocumentStatus(StrEnum):
-    DRAFT = "draft"  # uploaded; the maker is filling in metadata
-    PENDING = "pending_approval"  # submitted; waiting for a checker
-    APPROVED = "approved"  # viewable by the doc-repo's viewers
-    REJECTED = "rejected"  # back with the maker, with the checker's reason
-
-
-DEPARTMENT_METADATA_KEYS = ("department", "business_unit", "country")  # copied from the doc-repo
+    DRAFT = "draft"
+    PENDING = "pending_approval"
+    CHANGES_REQUESTED = "changes_requested"  # back with the maker; resubmitting continues the request
+    APPROVED = "approved"  # metadata locked
+    REJECTED = "rejected"  # back with the maker; resubmitting is a new request
 
 
 class Document(Base):
-    """An uploaded file in a doc-repo, its metadata and its maker-checker state.
+    """An uploaded file. `folder` is a logical path inside the repository ("Policies/2026"); the
+    file is stored by id (upload_dir/doc-repos/<repo>/<document>/<filename>)."""
 
-    The folder is a logical path inside the doc-repo ("Policies/2026"), kept from folder uploads
-    so the doc-repo can be browsed like a drive. The file itself is stored by document id
-    (upload_dir/doc-repos/<doc-repo>/<document>/<filename>), independent of the folder.
-    """
-
-    __tablename__ = "documents"
+    __tablename__ = "document"
     __table_args__ = (
-        CheckConstraint(
-            "status IN ('draft', 'pending_approval', 'approved', 'rejected')", name="ck_documents_status"
-        ),
-        CheckConstraint("checker_id IS NULL OR checker_id <> maker_id", name="ck_documents_maker_checker"),
-        Index("ix_documents_doc_repo_folder", "doc_repo_id", "folder"),
-        Index("ix_documents_doc_repo_status", "doc_repo_id", "status"),
+        CheckConstraint("status IN ('draft', 'pending_approval', 'changes_requested', 'approved', 'rejected')",
+                        name="ck_document_status"),
+        Index("ix_document_doc_repo_id_status", "doc_repo_id", "status"),
     )
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    doc_repo_id: Mapped[int] = mapped_column(ForeignKey("doc_repos.id", ondelete="CASCADE"))
-    folder: Mapped[str] = mapped_column(String(512), default="")  # "" = the doc-repo's top level
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
+    doc_repo_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("doc_repo.id"))
+    folder: Mapped[str] = mapped_column(String(512), default="")
     filename: Mapped[str] = mapped_column(String(256))
     content_type: Mapped[str | None] = mapped_column(String(128))
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
-    storage_path: Mapped[str] = mapped_column(String(512))  # relative to settings.upload_dir
-    upload_batch: Mapped[str | None] = mapped_column(String(36), index=True)  # one bulk upload
-
+    storage_path: Mapped[str] = mapped_column(String(512), default="")  # relative to settings.upload_dir
+    content_hash: Mapped[str] = mapped_column(String(64), default="")  # sha256 of the file
+    upload_batch: Mapped[str | None] = mapped_column(String(36), index=True)
     status: Mapped[str] = mapped_column(String(24), default=DocumentStatus.DRAFT.value)
-    maker_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    checker_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    maker_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id", ondelete="SET NULL"))
+    latest_approval_request_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)  # logical (approvals)
     submitted_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
-    decided_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
-    rejection_reason: Mapped[str | None] = mapped_column(Text)
-
-    # Department metadata: copied from the doc-repo at upload; the maker may override each key.
-    department_metadata: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
-    department_overrides: Mapped[list[str]] = mapped_column(JSON, default=list)  # keys the maker changed
-
-    # Phase 2: metadata an LLM extracts from the file in the background.
-    ai_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-
+    deleted_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id", ondelete="SET NULL"))
+    deleted_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
 
     doc_repo: Mapped[DocRepo] = relationship()
-    maker: Mapped[User | None] = relationship(foreign_keys=[maker_id])
-    checker: Mapped[User | None] = relationship(foreign_keys=[checker_id])
-    values: Mapped[list["DocumentValue"]] = relationship(
-        back_populates="document", cascade="all, delete-orphan", order_by="DocumentValue.key"
-    )
+    maker: Mapped[AppUser | None] = relationship(foreign_keys=[maker_id])
 
 
-class DocumentValue(Base):
-    """One metadata value of a document, one row per key, so documents can be found by metadata
-    (e.g. product_code = "VISA-PLAT"). `source` says where the key comes from: a doc-repo field
-    ("field") or one the maker added ("extra")."""
+class MetadataSource(StrEnum):
+    ADMIN = "ADMIN"  # set at a node by its owner or admin
+    MAKER = "MAKER"  # set on a document by a maker (an override, a removal, or their own field)
+    LLM = "LLM"  # phase 2: extracted from the file
+    INHERITED = "INHERITED"  # a document's copy of a value set above it
 
-    __tablename__ = "document_values"
+
+class MetadataField(Base):
+    """A metadata field, defined at a node (applies to the documents below it) or on one document."""
+
+    __tablename__ = "metadata_field"
     __table_args__ = (
-        CheckConstraint("source IN ('field', 'extra')", name="ck_document_values_source"),
-        Index("ix_document_values_key_value", "key", "value"),
+        CheckConstraint("(hierarchy_node_id IS NULL) <> (document_id IS NULL)", name="ck_metadata_field_one_target"),
+        UniqueConstraint("hierarchy_node_id", "key", name="uq_metadata_field_hierarchy_node_id_key"),
+        UniqueConstraint("document_id", "key", name="uq_metadata_field_document_id_key"),
     )
 
-    document_id: Mapped[int] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True)
-    source: Mapped[str] = mapped_column(String(8), primary_key=True)
-    key: Mapped[str] = mapped_column(String(64), primary_key=True)
-    value: Mapped[str] = mapped_column(Text, default="")
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
+    hierarchy_node_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("hierarchy_node.id"))
+    document_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("document.id"))
+    key: Mapped[str] = mapped_column(String(64))  # the label, case-folded and trimmed
+    label: Mapped[str] = mapped_column(String(64))
+    inheritable: Mapped[bool] = mapped_column(Boolean, default=True)
+    overridable: Mapped[bool] = mapped_column(Boolean, default=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
 
-    document: Mapped[Document] = relationship(back_populates="values")
+
+class MetadataValue(Base):
+    """A field's value at a node or on a document. On a document, a null value means the maker
+    removed the field there."""
+
+    __tablename__ = "metadata_value"
+    __table_args__ = (
+        CheckConstraint("(hierarchy_node_id IS NULL) <> (document_id IS NULL)", name="ck_metadata_value_one_target"),
+        CheckConstraint("source IN ('ADMIN', 'MAKER', 'LLM', 'INHERITED')", name="ck_metadata_value_source"),
+        UniqueConstraint("metadata_field_id", "hierarchy_node_id", name="uq_metadata_value_metadata_field_id_hierarchy_node_id"),
+        UniqueConstraint("metadata_field_id", "document_id", name="uq_metadata_value_metadata_field_id_document_id"),
+        Index("ix_metadata_value_field_value", "metadata_field_id", "value"),
+        Index("ix_metadata_value_document_id", "document_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
+    metadata_field_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("metadata_field.id"))
+    hierarchy_node_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("hierarchy_node.id"))
+    document_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("document.id"))
+    value: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(16))
+    inherited_from_node_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("hierarchy_node.id"))
+    frozen: Mapped[bool] = mapped_column(Boolean, default=False)  # the document is approved: locked
+    set_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id", ondelete="SET NULL"))
+    set_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    field: Mapped[MetadataField] = relationship()

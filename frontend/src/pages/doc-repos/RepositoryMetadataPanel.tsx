@@ -1,46 +1,34 @@
-import { useState } from "react";
-import { replaceRepositoryMetadata, type MetadataPair } from "../../api/documents";
+import { useState, type FormEvent } from "react";
+import { setRepoMetadata, type MetadataPair } from "../../api/doc-repos";
 import { ApiError } from "../../api/http";
 import { EditIcon, PlusIcon, TrashIcon } from "../../components/Icons";
+import { MessageBar } from "../../components/MessageBar";
+import { Modal } from "../../components/Modal";
+import { ConfirmDelete } from "../admin/common";
 
 interface Props {
   token: string;
-  docRepoId: number;
+  docRepoId: string;
   pairs: MetadataPair[];
-  canEdit: boolean; // the department admin
+  canEdit: boolean; // owner and admins
   onSaved: (pairs: MetadataPair[]) => void;
   onSessionEnded: (message: string) => void;
 }
 
 /**
- * The doc-repo's repository metadata: plain text key/value pairs. Every new document starts with
- * these values and a maker can change them per document. Department admins edit them.
+ * The repository's metadata fields as a list: every document here inherits them (a maker can change
+ * or remove them per document and add their own). The owner and admins add, edit and delete them.
  */
 export function RepositoryMetadataPanel({ token, docRepoId, pairs, canEdit, onSaved, onSessionEnded }: Props) {
-  const [rows, setRows] = useState<MetadataPair[] | null>(null); // null: not editing
-  const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ index: number | null } | null>(null); // index null: add
+  const [deleting, setDeleting] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
 
-  const set = (i: number, patch: Partial<MetadataPair>) =>
-    setRows((r) => r && r.map((x, j) => (j === i ? { ...x, ...patch } : x)));
-
-  async function save() {
-    if (!rows) return;
-    setSaving(true);
-    setError(null);
-    try {
-      // Rows left completely empty are dropped; a key without a value is fine.
-      const saved = await replaceRepositoryMetadata(token, docRepoId, rows.filter((r) => r.key.trim() || r.value.trim()));
-      onSaved(saved);
-      setRows(null);
-      setNotice("Saved the repository metadata.");
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 401) onSessionEnded(e.message);
-      else setError(e instanceof Error ? e.message : "Something went wrong.");
-    } finally {
-      setSaving(false);
-    }
+  /** Save the whole list (the API replaces it), then report. */
+  async function save(next: MetadataPair[], message: string) {
+    const saved = await setRepoMetadata(token, docRepoId, next);
+    onSaved(saved);
+    setNotice(message);
   }
 
   return (
@@ -50,71 +38,157 @@ export function RepositoryMetadataPanel({ token, docRepoId, pairs, canEdit, onSa
           <h2 id="repo-meta-title" className="panel__title">
             Repository metadata
           </h2>
-          <p className="panel__desc">
-            Every document in this repository starts with these values. A maker can change them per document and add
-            their own fields on top.
-          </p>
+          <p className="panel__desc">Default metadata for documents in this repository.</p>
         </div>
-        {canEdit && rows === null && (
-          <button type="button" className="btn-secondary"
-            onClick={() => { setRows(pairs.length ? pairs : [{ key: "", value: "" }]); setNotice(null); }}>
-            <EditIcon />
-            Edit
+        {canEdit && (
+          <button type="button" className="btn-primary" onClick={() => { setEditing({ index: null }); setNotice(null); }}>
+            <PlusIcon />
+            Add field
           </button>
         )}
       </div>
 
-      {notice && <p className="notice" role="status">{notice}</p>}
-      {error && <p className="alert" role="alert">{error}</p>}
+      {notice && <MessageBar onClose={() => setNotice(null)}>{notice}</MessageBar>}
 
-      {rows === null ? (
-        pairs.length === 0 ? (
-          <p className="admin-message">None yet.{canEdit ? " Use Edit to add some." : ""}</p>
-        ) : (
-          <dl className="meta-list">
-            {pairs.map((p) => (
-              <div key={p.key} className="meta-list__row">
-                <dt>{p.key}</dt>
-                <dd>{p.value || <span className="muted">Not set</span>}</dd>
-              </div>
-            ))}
-          </dl>
-        )
+      {pairs.length === 0 ? (
+        <p className="admin-message">No metadata fields yet.</p>
       ) : (
-        <div className="fields-edit">
-          {rows.map((r, i) => (
-            <div key={i} className="fields-edit__row">
-              <label className="form-field">
-                <span>Key</span>
-                <input value={r.key} onChange={(e) => set(i, { key: e.target.value })} placeholder="e.g. Product code" />
-              </label>
-              <label className="form-field">
-                <span>Value</span>
-                <input value={r.value} onChange={(e) => set(i, { value: e.target.value })} placeholder="e.g. VISA-PLAT" />
-              </label>
-              <button type="button" className="kb-icon-btn" aria-label={`Remove ${r.key || "entry"}`}
-                onClick={() => setRows((x) => x && x.filter((_, j) => j !== i))}>
-                <TrashIcon />
-              </button>
-            </div>
-          ))}
-          <button type="button" className="btn-link" onClick={() => setRows((x) => [...(x ?? []), { key: "", value: "" }])}>
-            <PlusIcon /> Add a key
-          </button>
-          <div className="fields-edit__actions">
-            <button type="button" className="btn-secondary" onClick={() => { setRows(null); setError(null); }}>
-              Cancel
-            </button>
-            <button type="button" className="btn-primary" disabled={saving} onClick={save}>
-              {saving ? "Saving…" : "Save"}
-            </button>
-          </div>
-          <small className="muted">
-            Changes apply to documents uploaded from now on. Removing a key keeps what makers typed, as one of their own
-            fields.
-          </small>
-        </div>
+        <table className="data-table">
+          <colgroup>
+            <col style={{ width: "34%" }} />
+            <col />
+            {canEdit && <col style={{ width: "96px" }} />}
+          </colgroup>
+          <thead>
+            <tr>
+              <th scope="col">Field</th>
+              <th scope="col">Value</th>
+              {canEdit && (
+                <th scope="col">
+                  <span className="visually-hidden">Actions</span>
+                </th>
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {pairs.map((p, i) => (
+              <tr key={p.label}>
+                <td className="truncate">{p.label}</td>
+                <td className="truncate">{p.value || <span className="muted">Not set</span>}</td>
+                {canEdit && (
+                  <td className="row-actions">
+                      <button type="button" className="kb-icon-btn kb-icon-btn--brand" aria-label={`Edit ${p.label}`}
+                        title="Edit" onClick={() => { setEditing({ index: i }); setNotice(null); }}>
+                        <EditIcon />
+                      </button>
+                      <button type="button" className="kb-icon-btn kb-icon-btn--brand" aria-label={`Delete ${p.label}`}
+                        title="Delete" onClick={() => { setDeleting(i); setNotice(null); }}>
+                        <TrashIcon />
+                      </button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
+
+      <Modal open={editing !== null} title={editing?.index == null ? "Add field" : "Edit field"} onClose={() => setEditing(null)}>
+        {editing && (
+          <FieldForm
+            existing={editing.index == null ? null : pairs[editing.index]}
+            onCancel={() => setEditing(null)}
+            onSave={async (field) => {
+              const next = editing.index == null
+                ? [...pairs, field]
+                : pairs.map((p, j) => (j === editing.index ? field : p));
+              await save(next, editing.index == null ? `Added ${field.label}.` : `Saved ${field.label}.`);
+              setEditing(null);
+            }}
+            onSessionEnded={onSessionEnded}
+          />
+        )}
+      </Modal>
+
+      <Modal open={deleting !== null} title="Delete field" onClose={() => setDeleting(null)}>
+        {deleting !== null && pairs[deleting] && (
+          <ConfirmDelete
+            message={<>Delete <strong>{pairs[deleting].label}</strong> from this repository's metadata?</>}
+            confirmLabel="Delete field"
+            onCancel={() => setDeleting(null)}
+            onConfirm={async () => {
+              const label = pairs[deleting].label;
+              try {
+                await save(pairs.filter((_, j) => j !== deleting), `Deleted ${label}.`);
+                setDeleting(null);
+              } catch (e) {
+                if (e instanceof ApiError && e.status === 401) onSessionEnded(e.message);
+                else throw e;
+              }
+            }}
+          />
+        )}
+      </Modal>
     </section>
+  );
+}
+
+function FieldForm({
+  existing,
+  onCancel,
+  onSave,
+  onSessionEnded,
+}: {
+  existing: MetadataPair | null;
+  onCancel: () => void;
+  onSave: (field: MetadataPair) => Promise<void>;
+  onSessionEnded: (message: string) => void;
+}) {
+  const [label, setLabel] = useState(existing?.label ?? "");
+  const [value, setValue] = useState(existing?.value ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave({ label: label.trim(), value: value.trim() });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) onSessionEnded(err.message);
+      else setError(err instanceof Error ? err.message : "Couldn't save.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit}>
+      <div className="modal__body">
+        {error && (
+          <MessageBar className="alert" role="alert" onClose={() => setError(null)}>
+            {error}
+          </MessageBar>
+        )}
+        <div className="form-grid">
+          <label className="form-field">
+            <span>Field</span>
+            <input value={label} onChange={(e) => setLabel(e.target.value)} required autoFocus={existing === null} />
+          </label>
+          <label className="form-field">
+            <span>Value</span>
+            <input value={value} onChange={(e) => setValue(e.target.value)} autoFocus={existing !== null} />
+          </label>
+        </div>
+      </div>
+      <div className="modal__footer">
+        <button type="button" className="btn-secondary" onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="submit" className="btn-primary" disabled={saving || !label.trim()}>
+          {saving ? "Saving…" : existing ? "Save" : "Add field"}
+        </button>
+      </div>
+    </form>
   );
 }

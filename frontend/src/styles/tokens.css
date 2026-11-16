@@ -80,3 +80,43 @@ body {
   background: var(--bg-page);
   -webkit-font-smoothing: antialiased;
 }
+
+/* Message bars (components/MessageBar.tsx): the text, then an X to close. */
+.message-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+
+.message-bar__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.message-bar__close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin: -1px -4px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.message-bar__close:hover,
+.message-bar__close:focus-visible {
+  opacity: 1;
+  background: rgb(0 0 0 / 6%);
+}
+
+.message-bar__close svg {
+  width: 14px;
+  height: 14px;
+}

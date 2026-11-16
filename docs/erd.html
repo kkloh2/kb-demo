@@ -1,0 +1,418 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<title>Data Hub ERD</title>
+<style>body{margin:0;background:#fff;font-family:'Open Sans',Arial,sans-serif} #d{padding:24px;display:inline-block}</style>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+</head><body><div id="d"><pre class="mermaid">
+erDiagram
+    approval_task ||--o{ approval_decision : "approval_task_id"
+    approval_request ||--o{ approval_event : "approval_request_id"
+    approval_task o|--o{ approval_event : "approval_task_id"
+    approval_type ||--o{ approval_request : "approval_type_id"
+    resource ||--o{ approval_request : "resource_pk"
+    workflow_instance o|--o{ approval_request : "workflow_instance_id"
+    approval_request ||--o{ approval_task : "approval_request_id"
+    step_instance ||--o{ approval_task : "step_instance_id"
+    approval_task ||--o{ approval_task_assignee : "approval_task_id"
+    approval_task ||--o{ approval_task_assignment : "approval_task_id"
+    app_user o|--o{ audit_event : "actor_id"
+    audit_action ||--o{ audit_event : "action"
+    hierarchy_node ||--o{ default_grant : "parent_node_id"
+    user_group ||--o{ default_grant : "team_group_id"
+    role ||--o{ default_grant : "role_id"
+    app_user o|--o{ default_grant : "created_by_id"
+    hierarchy_node ||--o{ doc_repo : "hierarchy_node_id"
+    app_user o|--o{ doc_repo : "created_by_id"
+    doc_repo ||--o{ document : "doc_repo_id"
+    app_user o|--o{ document : "maker_id"
+    app_user o|--o{ document : "deleted_by_id"
+    source_system ||--o{ hierarchy : "source_system_id"
+    hierarchy ||--o{ hierarchy_node : "hierarchy_id"
+    hierarchy_node o|--o{ hierarchy_node : "parent_id"
+    app_user o|--o{ hierarchy_node : "created_by_id"
+    app_user o|--o{ hierarchy_node : "deleted_by_id"
+    hierarchy_node o|--o{ metadata_field : "hierarchy_node_id"
+    document o|--o{ metadata_field : "document_id"
+    app_user o|--o{ metadata_field : "created_by_id"
+    metadata_field ||--o{ metadata_value : "metadata_field_id"
+    hierarchy_node o|--o{ metadata_value : "hierarchy_node_id"
+    document o|--o{ metadata_value : "document_id"
+    hierarchy_node o|--o{ metadata_value : "inherited_from_node_id"
+    app_user o|--o{ metadata_value : "set_by_id"
+    hierarchy_node ||--o{ node_team_grant : "hierarchy_node_id"
+    user_group ||--o{ node_team_grant : "team_group_id"
+    role ||--o{ node_team_grant : "role_id"
+    default_grant o|--o{ node_team_grant : "default_grant_id"
+    app_user o|--o{ node_team_grant : "granted_by_id"
+    role ||--o{ role_permission : "role_id"
+    permission ||--o{ role_permission : "permission_id"
+    workflow_instance ||--o{ step_instance : "workflow_instance_id"
+    hierarchy_node ||--o{ user_group : "hierarchy_node_id"
+    role o|--o{ user_group : "auto_join_role_id"
+    user_group ||--o{ user_group_member : "group_id"
+    app_user ||--o{ user_group_member : "user_id"
+    app_user o|--o{ user_group_member : "added_by_id"
+    user_group_member ||--o{ user_group_member_role : "group_member_id"
+    role ||--o{ user_group_member_role : "role_id"
+    app_user o|--o{ user_group_member_role : "granted_by_id"
+    workflow_definition ||--o{ workflow_binding : "workflow_definition_id"
+    workflow_version ||--o{ workflow_instance : "workflow_version_id"
+    workflow_definition ||--o{ workflow_version : "workflow_definition_id"
+    source_system ||..o{ approval_type : "source_system_id (logical)"
+    source_system ||..o{ resource : "source_system_id (logical)"
+    hierarchy_node ||..o{ resource : "hierarchy_node_id (logical)"
+    source_system ||..o{ approval_request : "source_system_id (logical)"
+    app_user ||..o{ approval_request : "requested_by (logical)"
+    app_user ||..o{ approval_request : "maker_id (logical)"
+    document ||..o{ approval_request : "subject_id (logical)"
+    user_group ||..o{ approval_task_assignment : "group_id (logical)"
+    hierarchy_node ||..o{ approval_task_assignment : "hierarchy_node_id (logical)"
+    role ||..o{ approval_task_assignment : "required_role_id (logical)"
+    app_user ||..o{ approval_task_assignee : "user_id (logical)"
+    app_user ||..o{ approval_decision : "decided_by (logical)"
+    app_user ||..o{ approval_event : "actor_id (logical)"
+    hierarchy_node ||..o{ workflow_binding : "hierarchy_node_id (logical)"
+    app_user ||..o{ workflow_binding : "bound_by_id (logical)"
+    hierarchy_node ||..o{ workflow_instance : "hierarchy_node_id (logical)"
+    approval_request ||..o{ workflow_instance : "subject_id (logical)"
+    hierarchy_node ||..o{ audit_event : "hierarchy_node_id (logical)"
+    app_user {
+        uuid id PK
+        string lan_id UK
+        string email
+        string display_name
+        string title
+        string directory_department
+        string status
+        timestamptz last_login_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    approval_decision {
+        uuid id PK
+        uuid approval_task_id FK
+        uuid decided_by "logical: app_user"
+        string decision
+        text comment
+        timestamptz decided_at
+    }
+    approval_event {
+        uuid id PK
+        uuid approval_request_id FK
+        uuid approval_task_id FK
+        string event_type
+        uuid actor_id "logical: app_user"
+        json event_data
+        bigint event_sequence
+        timestamptz created_at
+    }
+    approval_request {
+        uuid id PK
+        uuid source_system_id "logical: source_system"
+        uuid approval_type_id FK
+        uuid resource_pk FK
+        string external_reference_id
+        string subject_type
+        string subject_id "logical: document"
+        string title
+        json payload
+        string status
+        int current_round
+        bigint last_event_sequence
+        uuid requested_by "logical: app_user"
+        uuid maker_id "logical: app_user"
+        uuid workflow_instance_id FK
+        timestamptz submitted_at
+        timestamptz completed_at
+        timestamptz updated_at
+    }
+    approval_task {
+        uuid id PK
+        uuid approval_request_id FK
+        uuid step_instance_id FK, UK
+        int round
+        json subject_snapshot
+        json metadata
+        string status
+        string completion_rule
+        string outcome
+        timestamptz created_at
+        timestamptz completed_at
+    }
+    approval_task_assignee {
+        uuid id PK
+        uuid approval_task_id FK
+        uuid user_id "logical: app_user"
+        string status
+        timestamptz assigned_at
+        timestamptz updated_at
+    }
+    approval_task_assignment {
+        uuid id PK
+        uuid approval_task_id FK, UK
+        uuid group_id "logical: user_group"
+        uuid hierarchy_node_id "logical: hierarchy_node"
+        uuid required_role_id "logical: role"
+        string assignment_strategy
+        string status
+        timestamptz assigned_at
+    }
+    approval_type {
+        uuid id PK
+        uuid source_system_id "logical: source_system"
+        string code
+        string name
+        string status
+    }
+    audit_action {
+        string code PK
+        string source_system
+        string category
+        string label
+        string description
+    }
+    audit_event {
+        uuid id PK
+        timestamptz created_at
+        uuid actor_id FK
+        string actor_lan_id
+        string action FK
+        string source_system
+        string category
+        string target_type
+        string target_id
+        uuid hierarchy_node_id "logical: hierarchy_node"
+        string node_path
+        json details
+        string request_id
+        string client_ip
+    }
+    auth_sessions {
+        string id PK
+        string lan_id
+        timestamptz issued_at
+        timestamptz expires_at
+        timestamptz revoked_at
+        string revoked_reason
+        string ip_address
+        string user_agent
+    }
+    default_grant {
+        uuid id PK
+        uuid parent_node_id FK
+        string child_node_type
+        uuid team_group_id FK
+        uuid role_id FK
+        string status
+        uuid created_by_id FK
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    doc_repo {
+        uuid id PK
+        uuid hierarchy_node_id FK, UK
+        text description
+        uuid created_by_id FK
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    document {
+        uuid id PK
+        uuid doc_repo_id FK
+        string folder
+        string filename
+        string content_type
+        int size_bytes
+        string storage_path
+        string content_hash
+        string upload_batch
+        string status
+        uuid maker_id FK
+        uuid latest_approval_request_id
+        timestamptz submitted_at
+        uuid deleted_by_id FK
+        timestamptz deleted_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    hierarchy {
+        uuid id PK
+        uuid source_system_id FK, UK
+        string code UK
+        string name
+        json levels
+        string status
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    hierarchy_node {
+        uuid id PK
+        uuid hierarchy_id FK
+        uuid parent_id FK
+        string code
+        string path UK
+        string name
+        string node_type
+        string status
+        uuid created_by_id FK
+        uuid deleted_by_id FK
+        timestamptz deleted_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    metadata_field {
+        uuid id PK
+        uuid hierarchy_node_id FK
+        uuid document_id FK
+        string key
+        string label
+        bool inheritable
+        bool overridable
+        int position
+        uuid created_by_id FK
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    metadata_value {
+        uuid id PK
+        uuid metadata_field_id FK
+        uuid hierarchy_node_id FK
+        uuid document_id FK
+        text value
+        string source
+        uuid inherited_from_node_id FK
+        bool frozen
+        uuid set_by_id FK
+        timestamptz set_at
+    }
+    node_team_grant {
+        uuid id PK
+        uuid hierarchy_node_id FK
+        uuid team_group_id FK
+        uuid role_id FK
+        uuid default_grant_id FK
+        string status
+        uuid granted_by_id FK
+        timestamptz granted_at
+        timestamptz updated_at
+    }
+    permission {
+        uuid id PK
+        string code UK
+        string name
+        string description
+    }
+    resource {
+        uuid id PK
+        uuid source_system_id "logical: source_system"
+        string resource_type
+        string resource_id
+        string name
+        uuid hierarchy_node_id "logical: hierarchy_node"
+        string status
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    role {
+        uuid id PK
+        string code UK
+        string name
+        string description
+        int position
+    }
+    role_permission {
+        uuid role_id PK, FK
+        uuid permission_id PK, FK
+    }
+    source_system {
+        uuid id PK
+        string code UK
+        string name
+        string status
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    step_instance {
+        uuid id PK
+        uuid workflow_instance_id FK
+        int round
+        string step_id
+        string step_type
+        string status
+        string outcome
+        json detail
+        timestamptz started_at
+        timestamptz completed_at
+    }
+    user_group {
+        uuid id PK
+        uuid hierarchy_node_id FK
+        string code UK
+        string name
+        string group_type
+        uuid auto_join_role_id FK
+        string status
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    user_group_member {
+        uuid id PK
+        uuid group_id FK
+        uuid user_id FK
+        string status
+        uuid added_by_id FK
+        timestamptz added_at
+        timestamptz updated_at
+    }
+    user_group_member_role {
+        uuid id PK
+        uuid group_member_id FK
+        uuid role_id FK
+        string status
+        uuid granted_by_id FK
+        timestamptz granted_at
+        timestamptz updated_at
+    }
+    workflow_binding {
+        uuid id PK
+        uuid hierarchy_node_id "logical: hierarchy_node"
+        string kind
+        uuid workflow_definition_id FK
+        string status
+        uuid bound_by_id "logical: app_user"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    workflow_definition {
+        uuid id PK
+        string code UK
+        string name
+        string kind
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    workflow_instance {
+        uuid id PK
+        uuid workflow_version_id FK
+        string subject_type
+        string subject_id "logical: approval_request"
+        uuid hierarchy_node_id "logical: hierarchy_node"
+        int round
+        string current_step
+        string status
+        string outcome
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    workflow_version {
+        uuid id PK
+        uuid workflow_definition_id FK
+        int version
+        json definition
+        string status
+        timestamptz created_at
+        timestamptz published_at
+    }
+</pre></div>
+<script>mermaid.initialize({startOnLoad: true, theme: "neutral", er: {useMaxWidth: false}, maxTextSize: 200000});</script>
+</body></html>

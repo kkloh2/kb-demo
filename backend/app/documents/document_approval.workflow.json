@@ -1,0 +1,22 @@
+{
+  "code": "DOC_HUB.DOCUMENT_APPROVAL",
+  "name": "Document approval",
+  "start": "maker_upload",
+  "steps": [
+    {
+      "id": "maker_upload",
+      "type": "DOCUMENT_UPLOAD",
+      "name": "Raised by a maker",
+      "role": {"user_group": "default", "role": "MAKER"},
+      "on": {"PASSED": "checker_review", "FAILED": "END:UNAUTHORIZED"}
+    },
+    {
+      "id": "checker_review",
+      "type": "DOCUMENT_REVIEW",
+      "name": "Checker review",
+      "role": {"user_group": "default", "role": "CHECKER"},
+      "completion": {"rule": "ANY"},
+      "on": {"APPROVED": "END:APPROVED", "REJECTED": "END:REJECTED", "CHANGES_REQUESTED": "maker_upload"}
+    }
+  ]
+}

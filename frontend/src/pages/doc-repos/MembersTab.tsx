@@ -1,25 +1,25 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { ApiError } from "../../api/http";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { roleName } from "../../api/access";
 import {
   listMembers,
-  DOC_REPO_ROLE_NAMES,
-  DOC_REPO_ROLES,
   removeMember,
-  setMemberRoles,
-  type Member,
+  setMemberGroups,
   type DocRepo,
-  type DocRepoRole,
+  type Members,
+  type RepoGroup,
+  type RepoMember,
 } from "../../api/doc-repos";
-import { PlusIcon } from "../../components/Icons";
+import { ApiError } from "../../api/http";
+import { EditIcon, PlusIcon, SearchIcon } from "../../components/Icons";
+import { MessageBar } from "../../components/MessageBar";
 import { Modal } from "../../components/Modal";
-import { ConfirmDelete, ErrorMessage, Notice, useErrors } from "../admin/common";
+import { Pager, usePagination } from "../../components/Pager";
+import { timeAgo } from "../../lib/time";
+import { ErrorMessage, Notice, useErrors } from "../admin/common";
 
-const ROLE_HELP: Record<DocRepoRole, string> = {
-  MAKER: "Uploads documents and fills in their metadata",
-  CHECKER: "Approves or rejects what makers submit",
-  VIEWER: "Sees the repository's approved documents",
-};
-const EXCLUSIVE: Partial<Record<DocRepoRole, DocRepoRole>> = { MAKER: "CHECKER", CHECKER: "MAKER" };
+/** "default - Maker", or just the name when they hold no role in it. */
+const groupRoles = (g: { name: string; roles: string[] }) =>
+  g.roles.length ? `${g.name} - ${g.roles.map(roleName).join(", ")}` : g.name;
 
 interface Props {
   token: string;
@@ -27,133 +27,146 @@ interface Props {
   onSessionEnded: (message: string) => void;
 }
 
-/** Department admins: who holds which role in this doc-repo. Changes take effect immediately. */
+/** Owner and admins: who is in the repository's user groups, with which roles. Changes take effect at once. */
 export function MembersTab({ token, docRepo, onSessionEnded }: Props) {
-  const [members, setMembers] = useState<Member[] | null>(null);
-  const [editing, setEditing] = useState<{ member: Member | null } | null>(null);
-  const [removing, setRemoving] = useState<Member | null>(null);
+  const [data, setData] = useState<Members | null>(null);
+  const [editing, setEditing] = useState<RepoMember | "new" | null>(null);
+  const [query, setQuery] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
-  const { error, fail } = useErrors(onSessionEnded);
+  const { error, setError, fail } = useErrors(onSessionEnded);
 
   const load = useCallback(() => {
-    listMembers(token, docRepo.id).then(setMembers).catch(fail);
+    listMembers(token, docRepo.id).then(setData).catch(fail);
   }, [token, docRepo.id, fail]);
   useEffect(load, [load]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return (data?.members ?? []).filter((m) => !q || m.lan_id.toLowerCase().includes(q));
+  }, [data, query]);
+  const { rows, ...pager } = usePagination(filtered);
 
   return (
     <section className="panel" aria-labelledby="members-title">
       <div className="panel__head">
-        <div>
-          <h2 id="members-title" className="panel__title">
-            Members
-          </h2>
-          <p className="panel__desc">
-            Makers upload, checkers approve or reject, viewers see approved documents. Department admins of{" "}
-            {docRepo.department.name} see every repository's documents without being listed here.
-          </p>
-        </div>
-        <button type="button" className="btn-primary" onClick={() => setEditing({ member: null })}>
-          <PlusIcon />
-          Add member
-        </button>
+        <h2 id="members-title" className="panel__title">
+          Users
+        </h2>
       </div>
 
-      <Notice>{notice}</Notice>
+      <Notice onClose={() => setNotice(null)}>{notice}</Notice>
 
       {error ? (
-        <ErrorMessage>{error}</ErrorMessage>
-      ) : members === null ? (
-        <p className="admin-message">Loading members…</p>
-      ) : members.length === 0 ? (
-        <p className="admin-message">No members yet. Use Add member to give someone a role in this repository.</p>
+        <ErrorMessage onClose={() => setError(null)}>{error}</ErrorMessage>
+      ) : data === null ? (
+        <p className="admin-message">Loading users…</p>
       ) : (
-        <table className="data-table">
-          <colgroup>
-            <col style={{ width: "28%" }} />
-            <col style={{ width: "28%" }} />
-            <col />
-            <col style={{ width: "128px" }} />
-          </colgroup>
-          <thead>
-            <tr>
-              <th scope="col">Name</th>
-              <th scope="col">Email</th>
-              <th scope="col">Repository roles</th>
-              <th scope="col">
-                <span className="visually-hidden">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {members.map((m) => (
-              <tr key={m.lan_id}>
-                <td>
-                  <div className="person">
-                    <span className="person__name">{m.display_name}</span>
-                    <span className="person__id">
-                      {m.lan_id}
-                      {m.title ? ` · ${m.title}` : ""}
-                    </span>
-                  </div>
-                </td>
-                <td className="truncate">{m.email}</td>
-                <td>
-                  {m.roles.map((r) => (
-                    <span key={r} className="badge">
-                      {DOC_REPO_ROLE_NAMES[r]}
-                    </span>
+        <>
+          <div className="toolbar">
+            <div className="toolbar__left">
+              <label className="search">
+                <SearchIcon />
+                <input type="search" value={query} onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search by LAN ID" aria-label="Search by LAN ID" />
+              </label>
+            </div>
+            <button type="button" className="btn-primary" onClick={() => { setEditing("new"); setNotice(null); }}>
+              <PlusIcon />
+              Add user
+            </button>
+          </div>
+
+          {filtered.length === 0 ? (
+            <p className="admin-message">{query ? `No one matches “${query}”.` : "Nobody yet."}</p>
+          ) : (
+            <>
+              <table className="data-table members-table">
+                <colgroup>
+                  <col />
+                  <col style={{ width: "120px" }} />
+                  <col style={{ width: "280px" }} />
+                  <col style={{ width: "120px" }} />
+                  <col style={{ width: "48px" }} />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th scope="col">Name</th>
+                    <th scope="col">LAN ID</th>
+                    <th scope="col">User group roles</th>
+                    <th scope="col">Last updated</th>
+                    <th scope="col">
+                      <span className="visually-hidden">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((m) => (
+                    <tr key={m.lan_id}>
+                      <td className="truncate">{m.display_name}</td>
+                      <td className="muted truncate">{m.lan_id}</td>
+                      <td>
+                        <div className="stack">
+                          {m.groups.map((g) => (
+                            <span key={g.id} className="badge badge--neutral">
+                              {groupRoles(g)}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td title={m.updated_at ? new Date(m.updated_at).toLocaleString() : undefined}>
+                        {m.updated_at ? timeAgo(m.updated_at) : "—"}
+                      </td>
+                      <td className="kb-table__actions">
+                        <button type="button" className="kb-icon-btn kb-icon-btn--brand" aria-label={`Edit ${m.display_name}`}
+                          title="Edit" onClick={() => { setEditing(m); setNotice(null); }}>
+                          <EditIcon />
+                        </button>
+                      </td>
+                    </tr>
                   ))}
-                </td>
-                <td className="row-actions">
-                  <button type="button" className="btn-link" onClick={() => setEditing({ member: m })}>
-                    Edit
-                  </button>
-                  <button type="button" className="btn-link btn-link--danger" onClick={() => setRemoving(m)}>
-                    Remove
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </tbody>
+              </table>
+              <Pager {...pager} />
+            </>
+          )}
+
+          <h3 className="panel__subtitle">Teams with access</h3>
+          {data.team_grants.length === 0 ? (
+            <p className="admin-message">None. Platform admins can give teams such as Audit read-only access.</p>
+          ) : (
+            <ul className="plain-list">
+              {data.team_grants.map((g) => (
+                <li key={`${g.team}:${g.role}`}>
+                  <strong>{g.team_name}</strong> <span className="badge badge--neutral">{roleName(g.role)}</span>{" "}
+                  <span className="muted">
+                    {g.from_default ? "Every repository gets this; set by platform admins." : "Set by platform admins."}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
 
       <Modal
         open={editing !== null}
-        title={editing?.member ? `Roles for ${editing.member.display_name}` : "Add member"}
+        title={editing === "new" ? "Add user" : "Edit user"}
         onClose={() => setEditing(null)}
       >
-        {editing && (
+        {editing && data && (
           <MemberForm
             token={token}
             docRepoId={docRepo.id}
-            existing={editing.member}
+            groups={data.groups}
+            grantable={data.grantable_roles}
+            person={editing === "new" ? null : editing}
             onCancel={() => setEditing(null)}
-            onSaved={(m) => {
+            onSaved={(text) => {
               setEditing(null);
-              setNotice(m.roles.length
-                ? `${m.display_name} is now ${m.roles.map((r) => DOC_REPO_ROLE_NAMES[r].toLowerCase()).join(" and ")} here.`
-                : `Removed ${m.display_name}.`);
+              setNotice(text);
               load();
             }}
             onSessionEnded={onSessionEnded}
-          />
-        )}
-      </Modal>
-
-      <Modal open={removing !== null} title="Remove member" onClose={() => setRemoving(null)}>
-        {removing && (
-          <ConfirmDelete
-            message={<>Remove <strong>{removing.display_name}</strong> ({removing.lan_id}) from {docRepo.name}? They lose
-              access to its documents straight away.</>}
-            confirmLabel="Remove member"
-            onCancel={() => setRemoving(null)}
-            onConfirm={async () => {
-              await removeMember(token, docRepo.id, removing.lan_id);
-              setRemoving(null);
-              setNotice(`Removed ${removing.display_name}.`);
-              load();
-            }}
           />
         )}
       </Modal>
@@ -161,48 +174,65 @@ export function MembersTab({ token, docRepo, onSessionEnded }: Props) {
   );
 }
 
+/** Add someone, or change their roles in each user group (untick everything to take them out). */
 function MemberForm({
   token,
   docRepoId,
-  existing,
+  groups,
+  grantable,
+  person,
   onCancel,
   onSaved,
   onSessionEnded,
 }: {
   token: string;
-  docRepoId: number;
-  existing: Member | null;
+  docRepoId: string;
+  groups: RepoGroup[];
+  grantable: string[];
+  person: RepoMember | null; // null: add someone
   onCancel: () => void;
-  onSaved: (m: Member) => void;
+  onSaved: (message: string) => void;
   onSessionEnded: (message: string) => void;
 }) {
-  const [lanId, setLanId] = useState(existing?.lan_id ?? "");
-  const [roles, setRoles] = useState<Set<DocRepoRole>>(new Set(existing?.roles ?? ["VIEWER"]));
+  const isOwner = !!person?.roles.includes("OWNER");
+  const current = (id: string) => person?.groups.find((g) => g.id === id)?.roles ?? [];
+  const [lanId, setLanId] = useState(person?.lan_id ?? "");
+  const [chosen, setChosen] = useState<Record<string, Set<string>>>(() =>
+    Object.fromEntries(groups.map((g) => [g.id, new Set(person
+      ? current(g.id).filter((r) => r !== "OWNER")
+      : g.default ? ["VIEWER"] : [])])),
+  );
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  function toggle(role: DocRepoRole) {
-    setRoles((current) => {
-      const next = new Set(current);
+  function toggle(groupId: string, role: string) {
+    setChosen((c) => {
+      const next = new Set(c[groupId]);
       if (next.has(role)) next.delete(role);
-      else {
-        next.add(role);
-        const other = EXCLUSIVE[role];
-        if (other) next.delete(other); // one person can't be both maker and checker
-      }
-      return next;
+      else next.add(role);
+      return { ...c, [groupId]: next };
     });
   }
 
+  const picked = groups.map((g) => ({ id: g.id, roles: grantable.filter((r) => chosen[g.id]?.has(r)) }));
+  const anything = picked.some((g) => g.roles.length > 0);
+
   async function submit(e: FormEvent) {
     e.preventDefault();
+    const id = lanId.trim().toLowerCase();
     setError(null);
     setSaving(true);
     try {
-      onSaved(await setMemberRoles(token, docRepoId, lanId.trim(), DOC_REPO_ROLES.filter((r) => roles.has(r))));
+      if (person && !anything && !isOwner) {
+        await removeMember(token, docRepoId, person.lan_id);
+        onSaved(`Removed ${person.display_name}.`);
+      } else {
+        const m = await setMemberGroups(token, docRepoId, id, picked);
+        onSaved(person ? `Saved ${m.display_name}.` : `Added ${m.display_name}.`);
+      }
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) onSessionEnded(err.message);
-      else setError(err instanceof Error ? err.message : "Couldn't save the member.");
+      else setError(err instanceof Error ? err.message : "Couldn't save.");
       setSaving(false);
     }
   }
@@ -211,31 +241,45 @@ function MemberForm({
     <form onSubmit={submit}>
       <div className="modal__body">
         {error && (
-          <p className="alert" role="alert">
+          <MessageBar className="alert" role="alert" onClose={() => setError(null)}>
             {error}
-          </p>
+          </MessageBar>
         )}
         <div className="form-grid">
-          <label className="form-field form-field--wide">
-            <span>LAN ID</span>
-            <input value={lanId} onChange={(e) => setLanId(e.target.value)} readOnly={existing !== null}
-              placeholder="e.g. alex.tan" required autoFocus={existing === null} />
-            {!existing && <small>They need to have signed in to Data Hub once, or been added by a system admin.</small>}
-          </label>
+          {person ? (
+            <div className="form-field--wide person-head">
+              <span className="person-head__name">{person.display_name}</span>
+              <span className="person-head__id">{person.lan_id}</span>
+            </div>
+          ) : (
+            <label className="form-field form-field--wide">
+              <span>LAN ID</span>
+              <input value={lanId} onChange={(e) => setLanId(e.target.value)} required autoFocus />
+            </label>
+          )}
           <fieldset className="form-field form-field--wide role-group">
-            <legend>Repository roles</legend>
-            <div className="role-options">
-              {DOC_REPO_ROLES.map((r) => (
-                <label key={r} className="check check--block">
-                  <input type="checkbox" checked={roles.has(r)} onChange={() => toggle(r)} />
-                  <span>
-                    <strong>{DOC_REPO_ROLE_NAMES[r]}</strong>
-                    <small>{ROLE_HELP[r]}</small>
-                  </span>
-                </label>
+            <legend>User groups</legend>
+            <div className="perm-grid">
+              {groups.map((g) => (
+                <div key={g.id} className="perm-grid__row" role="group" aria-label={g.name}>
+                  <span className="perm-grid__group">{g.name}</span>
+                  <div className="perm-grid__options">
+                    {isOwner && g.default && (
+                      <label className="perm-grid__option">
+                        <input type="checkbox" checked disabled />
+                        {roleName("OWNER")}
+                      </label>
+                    )}
+                    {grantable.map((r) => (
+                      <label key={r} className="perm-grid__option">
+                        <input type="checkbox" checked={chosen[g.id]?.has(r) ?? false} onChange={() => toggle(g.id, r)} />
+                        {roleName(r)}
+                      </label>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
-            <small>Maker and checker can't both be held in one repository.</small>
           </fieldset>
         </div>
       </div>
@@ -243,8 +287,8 @@ function MemberForm({
         <button type="button" className="btn-secondary" onClick={onCancel}>
           Cancel
         </button>
-        <button type="submit" className="btn-primary" disabled={saving || roles.size === 0}>
-          {saving ? "Saving…" : existing ? "Save" : "Add member"}
+        <button type="submit" className="btn-primary" disabled={saving || !lanId.trim() || (!person && !anything)}>
+          {saving ? "Saving…" : person ? "Save" : "Add user"}
         </button>
       </div>
     </form>

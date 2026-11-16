@@ -1,6 +1,6 @@
 import { useCallback, useState, type ReactNode } from "react";
 import { ApiError } from "../../api/http";
-import type { RoleRow } from "../../api/admin";
+import { MessageBar } from "../../components/MessageBar";
 
 /** Error state for a tab: a 401 ends the session (back to sign-in); anything else is shown. */
 export function useErrors(onSessionEnded: (message: string) => void) {
@@ -15,25 +15,19 @@ export function useErrors(onSessionEnded: (message: string) => void) {
   return { error, setError, fail };
 }
 
-/** Role code -> display name, from the roles list (falls back to the code). */
-export function roleNamer(roles: RoleRow[] | null) {
-  const names = new Map((roles ?? []).map((r) => [r.code, r.name]));
-  return (code: string) => names.get(code) ?? code;
-}
-
-export function Notice({ children }: { children: ReactNode }) {
+export function Notice({ children, onClose }: { children: ReactNode; onClose?: () => void }) {
   return children ? (
-    <p className="notice" role="status">
+    <MessageBar key={String(children)} onClose={onClose}>
       {children}
-    </p>
+    </MessageBar>
   ) : null;
 }
 
-export function ErrorMessage({ children }: { children: ReactNode }) {
+export function ErrorMessage({ children, onClose }: { children: ReactNode; onClose?: () => void }) {
   return (
-    <p className="admin-message admin-message--error" role="alert">
+    <MessageBar key={String(children)} className="admin-message admin-message--error" role="alert" onClose={onClose}>
       {children}
-    </p>
+    </MessageBar>
   );
 }
 
@@ -67,9 +61,9 @@ export function ConfirmDelete({
     <>
       <div className="modal__body">
         {error && (
-          <p className="alert" role="alert">
+          <MessageBar className="alert" role="alert" onClose={() => setError(null)}>
             {error}
-          </p>
+          </MessageBar>
         )}
         <p className="modal__text">{message}</p>
       </div>

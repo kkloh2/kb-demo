@@ -83,6 +83,26 @@
   transition: background 0.15s, color 0.15s;
 }
 
+/* A page under another (e.g. Approvals > Workflows): indented, a little smaller. */
+.nav-list--sub {
+  margin-top: 2px;
+}
+
+.nav-item--sub {
+  height: 36px;
+  padding-left: calc(var(--sp-3) + 28px);
+  font-weight: 400;
+}
+
+.nav-item--sub svg {
+  width: 16px;
+  height: 16px;
+}
+
+.sidebar--collapsed .nav-item--sub {
+  padding-left: var(--sp-3);
+}
+
 .nav-item:hover {
   background: var(--gray-100);
   color: var(--text-primary);

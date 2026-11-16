@@ -35,7 +35,7 @@ def test_login_returns_token_and_user(client):
 def test_token_carries_the_directory_identity(client):
     token = client.post("/api/auth/login", json={"username": "analyst", "password": "datahub123"}).json()["access_token"]
     claims = _claims(token)
-    assert set(claims) == {"sub", "jti", "name", "email", "department", "title", "iss", "aud", "iat", "exp", "system_roles", "org_unit_roles"}
+    assert set(claims) == {"sub", "jti", "name", "email", "department", "title", "iss", "aud", "iat", "exp", "system_roles"}
     assert claims["sub"] == "analyst"
     assert (claims["name"], claims["department"], claims["title"]) == ("Alex Tan", "Risk Management", "Data Analyst")
     assert claims["iss"] == "data-hub" and claims["aud"] == "data-hub-api"
@@ -146,7 +146,7 @@ def test_two_hooks_cannot_add_the_same_claim(client, monkeypatch):
 
 
 def test_auth_imports_no_other_feature():
-    """Auth stays self-contained: only core and db, never users or later features."""
+    """Auth stays self-contained: only core, db and audit (shared infrastructure), never later features."""
     import ast
     import pathlib
 
@@ -158,7 +158,7 @@ def test_auth_imports_no_other_feature():
                 [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
             for name in names:
                 if name.startswith("app."):
-                    assert name.split(".")[1] in {"auth", "core", "db"}, f"{path.name} imports {name}"
+                    assert name.split(".")[1] in {"auth", "audit", "core", "db"}, f"{path.name} imports {name}"
 
 
 def test_logout_revokes_the_token(client, login):

@@ -21,6 +21,21 @@ export function usePagination<T>(items: T[], initialSize = 25) {
 
 type Props = Omit<ReturnType<typeof usePagination>, "rows">;
 
+/** Page numbers to show: all of them when few, else the first, the last and two either side of the
+ * current one, with null for a gap ("…"). */
+function pages(page: number, count: number): (number | null)[] {
+  if (count <= 9) return Array.from({ length: count }, (_, i) => i + 1);
+  const out: (number | null)[] = [];
+  const from = Math.max(2, Math.min(page - 2, count - 5));
+  const to = Math.min(count - 1, Math.max(page + 2, 6));
+  out.push(1);
+  if (from > 2) out.push(null);
+  for (let n = from; n <= to; n++) out.push(n);
+  if (to < count - 1) out.push(null);
+  out.push(count);
+  return out;
+}
+
 /** "Items per page" select plus first / previous / pages / next / last buttons. */
 export function Pager({ page, pageCount, pageSize, setPage, setPageSize }: Props) {
   return (
@@ -45,7 +60,12 @@ export function Pager({ page, pageCount, pageSize, setPage, setPageSize }: Props
         <button type="button" aria-label="Previous page" disabled={page === 1} onClick={() => setPage(page - 1)}>
           <ChevronIcon dir="left" />
         </button>
-        {Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => (
+        {pages(page, pageCount).map((n, i) =>
+          n === null ? (
+            <span key={`gap${i}`} className="pager__gap" aria-hidden="true">
+              …
+            </span>
+          ) : (
           <button
             key={n}
             type="button"
@@ -56,7 +76,8 @@ export function Pager({ page, pageCount, pageSize, setPage, setPageSize }: Props
           >
             {n}
           </button>
-        ))}
+          ),
+        )}
         <button type="button" aria-label="Next page" disabled={page === pageCount} onClick={() => setPage(page + 1)}>
           <ChevronIcon dir="right" />
         </button>

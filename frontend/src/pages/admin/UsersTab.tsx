@@ -1,58 +1,48 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import {
-  deleteUser,
-  listDepartments,
-  listRoles,
-  listUsers,
-  upsertUser,
-  type AdminUser,
-  type DepartmentRow,
-  type OrgUnitRoles,
-  type RoleRow,
-} from "../../api/admin";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { listUsers, roleName, upsertUser, type AdminUser } from "../../api/access";
+import { listSources, setGroupRoles, type SourceSystem } from "../../api/sources";
 import { ApiError } from "../../api/http";
-import { PlusIcon } from "../../components/Icons";
+import { EditIcon, PlusIcon, SearchIcon } from "../../components/Icons";
 import { Modal } from "../../components/Modal";
 import { Pager, usePagination } from "../../components/Pager";
+import { timeAgo } from "../../lib/time";
 import type { AdminTabProps } from "../AdminPage";
-import { ConfirmDelete, ErrorMessage, Notice, roleNamer, useErrors } from "./common";
+import { ErrorMessage, Notice, useErrors } from "./common";
+import { MessageBar } from "../../components/MessageBar";
 
 type Editing = { mode: "add" } | { mode: "edit"; user: AdminUser } | null;
 
+const when = (iso: string | null, never = "—") =>
+  iso ? <span title={new Date(iso).toLocaleString()}>{timeAgo(iso)}</span> : <span className="muted">{never}</span>;
+
+/** Everyone who has signed in or been added. Edit sets their user groups and roles in each source system. */
 export function UsersTab({ token, user: me, onSessionEnded }: AdminTabProps) {
   const [users, setUsers] = useState<AdminUser[] | null>(null);
-  const [departments, setDepartments] = useState<DepartmentRow[]>([]);
-  const [roles, setRoles] = useState<RoleRow[] | null>(null);
+  const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<Editing>(null);
-  const [deleting, setDeleting] = useState<AdminUser | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const { error, fail } = useErrors(onSessionEnded);
+  const { error, setError, fail } = useErrors(onSessionEnded);
 
   const load = useCallback(() => {
-    Promise.all([listUsers(token), listDepartments(token), listRoles(token)])
-      .then(([u, d, r]) => {
-        setUsers(u);
-        setDepartments(d);
-        setRoles(r);
-      })
-      .catch(fail);
+    listUsers(token).then(setUsers).catch(fail);
   }, [token, fail]);
   useEffect(load, [load]);
 
-  const roleName = roleNamer(roles);
-  const { rows, ...pager } = usePagination(users ?? []);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? (users ?? []).filter((u) => u.lan_id.includes(q)) : users ?? [];
+  }, [users, query]);
+  const { rows, ...pager } = usePagination(filtered);
 
   return (
-    <section className="panel" aria-labelledby="users-title">
-      <div className="panel__head">
-        <div>
-          <h2 id="users-title" className="panel__title">
-            Manage users
-          </h2>
-          <p className="panel__desc">
-            Everyone who has signed in, or been added here, with their system roles and their roles in each
-            department. Changing someone's roles signs them out, so their next sign-in picks up the change.
-          </p>
+    <section className="panel" aria-label="Users">
+      <div className="toolbar">
+        <div className="toolbar__left">
+          <label className="search">
+            <SearchIcon />
+            <input type="search" value={query} onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search by LAN ID" aria-label="Search by LAN ID" />
+          </label>
         </div>
         <button type="button" className="btn-primary" onClick={() => setEditing({ mode: "add" })}>
           <PlusIcon />
@@ -60,30 +50,36 @@ export function UsersTab({ token, user: me, onSessionEnded }: AdminTabProps) {
         </button>
       </div>
 
-      <Notice>{notice}</Notice>
+      <Notice onClose={() => setNotice(null)}>{notice}</Notice>
 
       {error ? (
-        <ErrorMessage>{error}</ErrorMessage>
+        <ErrorMessage onClose={() => setError(null)}>{error}</ErrorMessage>
       ) : users === null ? (
         <p className="admin-message">Loading users…</p>
+      ) : filtered.length === 0 ? (
+        <p className="admin-message">{query ? `No one matches “${query}”.` : "Nobody yet."}</p>
       ) : (
         <>
-          <table className="data-table">
+          <table className="data-table members-table">
             <colgroup>
-              <col style={{ width: "20%" }} />
-              <col style={{ width: "20%" }} />
-              <col style={{ width: "14%" }} />
-              <col style={{ width: "14%" }} />
               <col />
-              <col style={{ width: "128px" }} />
+              <col style={{ width: "120px" }} />
+              <col style={{ width: "22%" }} />
+              <col style={{ width: "14%" }} />
+              <col style={{ width: "110px" }} />
+              <col style={{ width: "110px" }} />
+              <col style={{ width: "120px" }} />
+              <col style={{ width: "48px" }} />
             </colgroup>
             <thead>
               <tr>
                 <th scope="col">Name</th>
+                <th scope="col">LAN ID</th>
                 <th scope="col">Email</th>
                 <th scope="col">Department</th>
-                <th scope="col">System roles</th>
-                <th scope="col">Department roles</th>
+                <th scope="col">Last sign-in</th>
+                <th scope="col">Created</th>
+                <th scope="col">Last updated</th>
                 <th scope="col">
                   <span className="visually-hidden">Actions</span>
                 </th>
@@ -91,49 +87,20 @@ export function UsersTab({ token, user: me, onSessionEnded }: AdminTabProps) {
             </thead>
             <tbody>
               {rows.map((u) => (
-                <tr key={u.lan_id}>
-                  <td>
-                    <div className="person">
-                      <span className="person__name">{u.display_name}</span>
-                      <span className="person__id">
-                        {u.lan_id}
-                        {u.title ? ` · ${u.title}` : ""}
-                      </span>
-                    </div>
-                  </td>
+                <tr key={u.lan_id} className={u.status === "ACTIVE" ? undefined : "row--muted"}
+                  title={u.status === "ACTIVE" ? undefined : "Access switched off"}>
+                  <td className="truncate">{u.display_name}</td>
+                  <td className="muted truncate">{u.lan_id}</td>
                   <td className="truncate">{u.email}</td>
-                  <td className="truncate">{u.department || <span className="muted">—</span>}</td>
-                  <td>
-                    {u.system_roles.length ? (
-                      u.system_roles.map((r) => (
-                        <span key={r} className="badge">
-                          {roleName(r)}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="muted">None</span>
-                    )}
-                  </td>
-                  <td>
-                    {Object.keys(u.org_unit_roles).length ? (
-                      Object.entries(u.org_unit_roles).map(([code, rs]) => (
-                        <span key={code} className="badge badge--neutral">
-                          <strong>{code}</strong> {rs.map(roleName).join(", ")}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="muted">None</span>
-                    )}
-                  </td>
-                  <td className="row-actions">
-                    <button type="button" className="btn-link" onClick={() => setEditing({ mode: "edit", user: u })}>
-                      Edit
+                  <td className="truncate">{u.directory_department || <span className="muted">—</span>}</td>
+                  <td>{when(u.last_login_at, "Never")}</td>
+                  <td>{when(u.created_at)}</td>
+                  <td>{when(u.updated_at)}</td>
+                  <td className="kb-table__actions">
+                    <button type="button" className="kb-icon-btn kb-icon-btn--brand" aria-label={`Edit ${u.display_name}`}
+                      title="Edit" onClick={() => setEditing({ mode: "edit", user: u })}>
+                      <EditIcon />
                     </button>
-                    {u.lan_id !== me.username && (
-                      <button type="button" className="btn-link btn-link--danger" onClick={() => setDeleting(u)}>
-                        Delete
-                      </button>
-                    )}
                   </td>
                 </tr>
               ))}
@@ -143,45 +110,33 @@ export function UsersTab({ token, user: me, onSessionEnded }: AdminTabProps) {
         </>
       )}
 
-      <Modal
-        open={editing !== null}
-        title={editing?.mode === "edit" ? `Edit ${editing.user.display_name}` : "Add user"}
-        onClose={() => setEditing(null)}
-      >
-        {editing && (
-          <UserForm
+      <Modal open={editing !== null} title={editing?.mode === "edit" ? "Edit user" : "Add user"}
+        onClose={() => setEditing(null)}>
+        {editing?.mode === "add" && (
+          <AddUserForm
             token={token}
-            existing={editing.mode === "edit" ? editing.user : null}
-            departments={departments}
-            roles={roles ?? []}
+            existing={new Set((users ?? []).map((u) => u.lan_id))}
             onCancel={() => setEditing(null)}
-            onSaved={(u, created) => {
+            onSaved={(lanId) => {
               setEditing(null);
-              setNotice(`${created ? "Added" : "Saved"} ${u.display_name} (${u.lan_id}).`);
+              setNotice(`Added ${lanId}. Their name and email fill in from the directory at their first sign-in.`);
               load();
             }}
             onSessionEnded={onSessionEnded}
           />
         )}
-      </Modal>
-
-      <Modal open={deleting !== null} title="Delete user" onClose={() => setDeleting(null)}>
-        {deleting && (
-          <ConfirmDelete
-            message={
-              <>
-                Delete <strong>{deleting.display_name}</strong> ({deleting.lan_id}) and all their roles? They're
-                signed out now. If the directory still lets them in, they come back as a new user with Public only.
-              </>
-            }
-            confirmLabel="Delete user"
-            onCancel={() => setDeleting(null)}
-            onConfirm={async () => {
-              await deleteUser(token, deleting.lan_id);
-              setDeleting(null);
-              setNotice(`Deleted ${deleting.display_name} (${deleting.lan_id}).`);
+        {editing?.mode === "edit" && (
+          <UserForm
+            token={token}
+            user={editing.user}
+            isMe={editing.user.lan_id === me.username}
+            onCancel={() => setEditing(null)}
+            onSaved={(message) => {
+              setEditing(null);
+              setNotice(message);
               load();
             }}
+            onSessionEnded={onSessionEnded}
           />
         )}
       </Modal>
@@ -189,84 +144,76 @@ export function UsersTab({ token, user: me, onSessionEnded }: AdminTabProps) {
   );
 }
 
-// --------------------------------------------------------------------------- add / edit form
-
-const EXCLUSIVE: Record<string, string> = { MAKER: "CHECKER", CHECKER: "MAKER" };
-
-function UserForm({
+/**
+ * Add someone by LAN ID and choose their user groups and roles in each source system (the same
+ * layout as Source systems -> Add user). Only Platform -> Users (Viewer) starts ticked; anything
+ * left unticked, including other systems' users groups they'd otherwise join, they don't get.
+ */
+function AddUserForm({
   token,
   existing,
-  departments,
-  roles,
   onCancel,
   onSaved,
   onSessionEnded,
 }: {
   token: string;
-  existing: AdminUser | null;
-  departments: DepartmentRow[];
-  roles: RoleRow[];
+  existing: Set<string>; // LAN IDs already here
   onCancel: () => void;
-  onSaved: (u: AdminUser, created: boolean) => void;
+  onSaved: (lanId: string) => void;
   onSessionEnded: (message: string) => void;
 }) {
-  const systemRoles = roles.filter((r) => r.scope === "system");
-  const orgRoles = roles.filter((r) => r.scope === "org_unit");
-  const [form, setForm] = useState({
-    lan_id: existing?.lan_id ?? "",
-    display_name: existing?.display_name ?? "",
-    email: existing?.email ?? "",
-    title: existing?.title ?? "",
-    department: existing?.department ?? "",
-  });
-  const [system, setSystem] = useState<Set<string>>(new Set(existing ? existing.system_roles : ["PUBLIC"]));
-  const [org, setOrg] = useState<OrgUnitRoles>(existing?.org_unit_roles ?? {});
+  const [sources, setSources] = useState<SourceSystem[] | null>(null);
+  const [lanId, setLanId] = useState("");
+  const [chosen, setChosen] = useState<Record<string, Set<string>>>({}); // "SYSTEM:GROUP" -> roles
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const set = (k: keyof typeof form) => (e: { target: { value: string } }) =>
-    setForm((f) => ({ ...f, [k]: e.target.value }));
+  useEffect(() => {
+    listSources(token)
+      .then((s) => {
+        const ready = s.filter((x) => x.hierarchy);
+        setSources(ready);
+        setChosen(Object.fromEntries(ready.flatMap((x) => x.hierarchy!.groups.map((g) =>
+          [`${x.code}:${g.type}`, new Set(x.code === "PLATFORM" && g.type === "USERS" ? g.roles : [])]))));
+      })
+      .catch((e: unknown) => {
+        if (e instanceof ApiError && e.status === 401) onSessionEnded(e.message);
+        else setError(e instanceof Error ? e.message : "Couldn't load the source systems.");
+      });
+  }, [token, onSessionEnded]);
 
-  function toggleSystem(code: string) {
-    setSystem((s) => {
-      const next = new Set(s);
-      if (next.has(code)) next.delete(code);
-      else next.add(code);
-      return next;
-    });
-  }
-
-  function toggleOrg(dept: string, code: string) {
-    setOrg((o) => {
-      const held = new Set(o[dept] ?? []);
-      if (held.has(code)) held.delete(code);
-      else {
-        held.add(code);
-        if (EXCLUSIVE[code]) held.delete(EXCLUSIVE[code]); // one person can't be both maker and checker
-      }
-      const next = { ...o, [dept]: [...held].sort() };
-      if (!held.size) delete next[dept];
-      return next;
+  function toggle(key: string, role: string) {
+    setChosen((c) => {
+      const next = new Set(c[key]);
+      if (next.has(role)) next.delete(role);
+      else next.add(role);
+      return { ...c, [key]: next };
     });
   }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    setError(null);
+    const id = lanId.trim().toLowerCase();
+    if (!id || !sources) return;
+    if (existing.has(id)) {
+      setError(`${id} is already here. Use Edit on their row.`);
+      return;
+    }
     setSaving(true);
+    setError(null);
     try {
-      const saved = await upsertUser(token, form.lan_id.trim(), {
-        display_name: form.display_name,
-        email: form.email,
-        department: form.department,
-        title: form.title,
-        system_roles: [...system].sort(),
-        org_unit_roles: org,
-      });
-      onSaved(saved, existing === null);
+      await upsertUser(token, id, {});
+      // A new user has just joined every users group (auto-join); change only what differs.
+      for (const s of sources)
+        for (const g of s.hierarchy!.groups) {
+          const wanted = g.roles.filter((r) => chosen[`${s.code}:${g.type}`]?.has(r));
+          const now = g.auto_join_role ? [g.auto_join_role] : [];
+          if (wanted.join() !== now.join()) await setGroupRoles(token, s.code, g.type, id, wanted);
+        }
+      onSaved(id);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) onSessionEnded(err.message);
-      else setError(err instanceof Error ? err.message : "Couldn't save the user.");
+      else setError(err instanceof Error ? err.message : "Couldn't add them.");
       setSaving(false);
     }
   }
@@ -275,89 +222,41 @@ function UserForm({
     <form onSubmit={submit}>
       <div className="modal__body">
         {error && (
-          <p className="alert" role="alert">
+          <MessageBar className="alert" role="alert" onClose={() => setError(null)}>
             {error}
-          </p>
+          </MessageBar>
         )}
         <div className="form-grid">
-          <label className="form-field">
-            <span>LAN ID</span>
-            <input
-              value={form.lan_id}
-              onChange={set("lan_id")}
-              readOnly={existing !== null}
-              required
-              autoFocus={existing === null}
-            />
-          </label>
-          <label className="form-field">
-            <span>Name</span>
-            <input value={form.display_name} onChange={set("display_name")} required />
-          </label>
-          <label className="form-field">
-            <span>Email</span>
-            <input type="email" value={form.email} onChange={set("email")} required />
-          </label>
-          <label className="form-field">
-            <span>Job title</span>
-            <input value={form.title} onChange={set("title")} />
-          </label>
           <label className="form-field form-field--wide">
-            <span>Department (from the directory)</span>
-            <input value={form.department} onChange={set("department")} placeholder="e.g. Risk Management" />
-            <small>Name, email, department and job title are refreshed from the directory at each sign-in.</small>
+            <span>LAN ID</span>
+            <input value={lanId} onChange={(e) => setLanId(e.target.value)} required autoFocus />
           </label>
-
           <fieldset className="form-field form-field--wide role-group">
-            <legend>System roles</legend>
-            <div className="role-checks">
-              {systemRoles.map((r) => (
-                <label key={r.code} className="check" title={r.description}>
-                  <input type="checkbox" checked={system.has(r.code)} onChange={() => toggleSystem(r.code)} />
-                  {r.name}
-                </label>
-              ))}
-            </div>
-          </fieldset>
-
-          <fieldset className="form-field form-field--wide role-group">
-            <legend>Department roles</legend>
-            {departments.length === 0 ? (
-              <small>No departments yet. Add one in the Departments tab.</small>
+            <legend>User groups</legend>
+            {sources === null ? (
+              <small>Loading…</small>
             ) : (
-              <table className="role-matrix">
-                <thead>
-                  <tr>
-                    <th scope="col">Department</th>
-                    {orgRoles.map((r) => (
-                      <th key={r.code} scope="col" title={r.description}>
-                        {r.name}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {departments.map((d) => (
-                    <tr key={d.code}>
-                      <th scope="row">
-                        <span className="code">{d.code}</span> <span className="muted">{d.name}</span>
-                      </th>
-                      {orgRoles.map((r) => (
-                        <td key={r.code}>
-                          <input
-                            type="checkbox"
-                            aria-label={`${r.name} in ${d.name}`}
-                            checked={(org[d.code] ?? []).includes(r.code)}
-                            onChange={() => toggleOrg(d.code, r.code)}
-                          />
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="perm-grid">
+                {sources.map((s) => (
+                  <div key={s.code} className="perm-grid__row" role="group" aria-label={s.name}>
+                    <span className="perm-grid__group">{s.name}</span>
+                    <div className="perm-grid__options">
+                      {s.hierarchy!.groups.flatMap((g) =>
+                        g.roles.map((r) => {
+                          const key = `${s.code}:${g.type}`;
+                          return (
+                            <label key={`${key}:${r}`} className="perm-grid__option">
+                              <input type="checkbox" checked={chosen[key]?.has(r) ?? false} onChange={() => toggle(key, r)} />
+                              {GROUP_LABEL[g.type] ?? g.name} - {roleName(r)}
+                            </label>
+                          );
+                        }),
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
-            <small>Maker and checker can't both be held in one department.</small>
           </fieldset>
         </div>
       </div>
@@ -365,8 +264,141 @@ function UserForm({
         <button type="button" className="btn-secondary" onClick={onCancel}>
           Cancel
         </button>
-        <button type="submit" className="btn-primary" disabled={saving}>
-          {saving ? "Saving…" : existing ? "Save" : "Add user"}
+        <button type="submit" className="btn-primary" disabled={saving || !lanId.trim() || sources === null}>
+          {saving ? "Adding…" : "Add user"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+const GROUP_LABEL: Record<string, string> = { ADMINS: "Admins", USERS: "Users" };
+
+/**
+ * Edit someone the same way as Add user (and Source systems -> Manage users): their user groups
+ * and roles in every source system. Their name, email,
+ * title and department come from the directory.
+ */
+function UserForm({
+  token,
+  user: u,
+  isMe,
+  onCancel,
+  onSaved,
+  onSessionEnded,
+}: {
+  token: string;
+  user: AdminUser;
+  isMe: boolean;
+  onCancel: () => void;
+  onSaved: (message: string) => void;
+  onSessionEnded: (message: string) => void;
+}) {
+  const [sources, setSources] = useState<SourceSystem[] | null>(null);
+  const [current, setCurrent] = useState<Record<string, string[]>>({}); // "SYSTEM:GROUP" -> roles now
+  const [chosen, setChosen] = useState<Record<string, Set<string>>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    listSources(token)
+      .then((s) => {
+        const ready = s.filter((x) => x.hierarchy);
+        const now: Record<string, string[]> = {};
+        for (const x of ready)
+          for (const g of x.hierarchy!.groups)
+            now[`${x.code}:${g.type}`] = g.members.find((m) => m.lan_id === u.lan_id)?.roles ?? [];
+        setSources(ready);
+        setCurrent(now);
+        setChosen(Object.fromEntries(Object.entries(now).map(([k, roles]) => [k, new Set(roles)])));
+      })
+      .catch((e: unknown) => {
+        if (e instanceof ApiError && e.status === 401) onSessionEnded(e.message);
+        else setError(e instanceof Error ? e.message : "Couldn't load the source systems.");
+      });
+  }, [token, u.lan_id, onSessionEnded]);
+
+  function toggle(key: string, role: string) {
+    setChosen((c) => {
+      const next = new Set(c[key]);
+      if (next.has(role)) next.delete(role);
+      else next.add(role);
+      return { ...c, [key]: next };
+    });
+  }
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!sources) return;
+    setSaving(true);
+    setError(null);
+    try {
+      for (const s of sources)
+        for (const g of s.hierarchy!.groups) {
+          const key = `${s.code}:${g.type}`;
+          const wanted = g.roles.filter((r) => chosen[key]?.has(r));
+          if (wanted.join() !== [...(current[key] ?? [])].sort().join())
+            await setGroupRoles(token, s.code, g.type, u.lan_id, wanted);
+        }
+      onSaved(`Saved ${u.display_name} (${u.lan_id}).`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) onSessionEnded(err.message);
+      else setError(err instanceof Error ? err.message : "Couldn't save.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit}>
+      <div className="modal__body">
+        {error && (
+          <MessageBar className="alert" role="alert" onClose={() => setError(null)}>
+            {error}
+          </MessageBar>
+        )}
+        <div className="form-grid">
+          <div className="form-field--wide person-head">
+            <span className="person-head__name">{u.display_name}</span>
+            <span className="person-head__id">{u.lan_id}</span>
+          </div>
+          <fieldset className="form-field form-field--wide role-group">
+            <legend>User groups</legend>
+            {sources === null ? (
+              <small>Loading…</small>
+            ) : (
+              <div className="perm-grid">
+                {sources.map((s) => (
+                  <div key={s.code} className="perm-grid__row" role="group" aria-label={s.name}>
+                    <span className="perm-grid__group">{s.name}</span>
+                    <div className="perm-grid__options">
+                      {s.hierarchy!.groups.flatMap((g) =>
+                        g.roles.map((r) => {
+                          const key = `${s.code}:${g.type}`;
+                          // You can't take away your own platform admin role.
+                          const locked = isMe && s.code === "PLATFORM" && g.type === "ADMINS" && !!current[key]?.length;
+                          return (
+                            <label key={`${key}:${r}`} className="perm-grid__option">
+                              <input type="checkbox" checked={chosen[key]?.has(r) ?? false} disabled={locked}
+                                onChange={() => toggle(key, r)} />
+                              {GROUP_LABEL[g.type] ?? g.name} - {roleName(r)}
+                            </label>
+                          );
+                        }),
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </fieldset>
+        </div>
+      </div>
+      <div className="modal__footer">
+        <button type="button" className="btn-secondary" onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="submit" className="btn-primary" disabled={saving || sources === null}>
+          {saving ? "Saving…" : "Save"}
         </button>
       </div>
     </form>

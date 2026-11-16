@@ -23,5 +23,5 @@ class Principal(Identity):
 
     session_id: str
     # Claims added by sign-in hooks (e.g. "system_roles"), read-only. Auth doesn't interpret them;
-    # the module that added a claim reads it back (e.g. app.users.service.org_unit_roles_of).
+    # the module that added a claim reads it back (e.g. app.access.service).
     claims: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))

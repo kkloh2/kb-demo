@@ -1,175 +1,304 @@
-"""Doc-repo endpoints.
+"""Repository endpoints.
 
-    GET    /api/doc-repos                              PUBLIC system role   every doc-repo (opening one needs more)
-    GET    /api/doc-repos/departments                  signed in        departments the caller can create doc-repos in
-    POST   /api/departments/{code}/doc-repos           that department's admin
-    GET    /api/doc-repos/{doc_repo_id}                 department VIEWER or admin, or any doc-repo role
-    PUT    /api/doc-repos/{doc_repo_id}                 the department's admin   name, description, department metadata
-    DELETE /api/doc-repos/{doc_repo_id}                 the department's admin
-    GET    /api/doc-repos/{doc_repo_id}/members         the department's admin
-    PUT    /api/doc-repos/{doc_repo_id}/members/{lan_id}   the department's admin   {roles: [MAKER|CHECKER|VIEWER]}
-    DELETE /api/doc-repos/{doc_repo_id}/members/{lan_id}   the department's admin
+    GET    /api/doc-repos                            docs.repository.list at DOC_HUB root   every active repository
+    POST   /api/doc-repos                            Doc Hub admins (docs.repository.create at its root) or platform admins
+    GET    /api/doc-repos/deleted                    platform admin
+    GET    /api/doc-repos/{id}                       docs.repository.view
+    PUT    /api/doc-repos/{id}                       docs.repository.edit      name, description
+    PUT    /api/doc-repos/{id}/metadata              docs.repository.edit      [{label, value}]
+    DELETE /api/doc-repos/{id}                       access.node.delete        owner only; soft delete
+    POST   /api/doc-repos/{id}/restore               platform admin
+    GET    /api/doc-repos/{id}/groups                access.members.manage     user groups (names)
+    POST   /api/doc-repos/{id}/groups                access.members.manage     {name}
+    PUT    /api/doc-repos/{id}/groups/{group_id}     access.members.manage     {name}: rename
+    DELETE /api/doc-repos/{id}/groups/{group_id}     access.members.manage     delete (not the default group)
+    GET    /api/doc-repos/{id}/members               access.members.manage     members, their groups and roles, team grants
+    PUT    /api/doc-repos/{id}/members/{lan_id}      access.members.manage     {groups: [{id, roles}]}
+    DELETE /api/doc-repos/{id}/members/{lan_id}      access.members.manage
+    PUT    /api/doc-repos/{id}/owner                 access.node.transfer      hand ownership over
+    GET    /api/doc-repos/{id}/workflow              docs.repository.edit      the workflow new submissions use, and the choices
+    PUT    /api/doc-repos/{id}/workflow              docs.repository.edit      {workflow_id}: choose another
 """
 
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Path, Response, status
 
+from app.access import service as access
+from app.access.authorization import Can, Param, PlatformAdmin, Root
+from app.access.catalog import REPO_GROUP_ROLES, P, RoleCode, SystemCode
+from app.access.models import AppUser
+from app.access.router import member_out
+from app.access.schemas import TeamGrantOut
 from app.auth.dependencies import CurrentUser
-from app.auth.identity import Principal
 from app.db.session import Db
-from app.documents import service
-from app.documents.documents import visible_counts
-from app.documents.authorization import DocRepoRoles
-from app.documents.models import DocRepo
+from app.core.errors import InvalidRequest
+from app.documents import metadata, service, workflow_steps
+from app.workflows import engine as workflows
 from app.documents.schemas import (
-    DepartmentMetadata,
-    DepartmentRef,
-    MemberOut,
-    MetadataPair,
-    MemberRolesIn,
     DocRepoAccessOut,
+    DocRepoCreate,
     DocRepoIn,
     DocRepoOut,
+    GroupIn,
+    GroupOut,
+    GroupsOut,
+    MemberGroupOut,
+    MemberGroupsIn,
+    MembersOut,
+    MetadataPair,
+    OwnerIn,
+    PersonRef,
+    RepoMemberOut,
+    RepoWorkflowIn,
+    RepoWorkflowOut,
+    WorkflowChoice,
+    WorkflowStepBrief,
 )
-from app.users.authorization import OrgUnitRoles, SystemRoles
 
 router = APIRouter(tags=["doc-repos"])
 
-DocRepoId = Annotated[int, Path(ge=1, description="Doc-repo id")]
-DepartmentCode = Annotated[str, Path(min_length=1, max_length=32, description='e.g. "RISK" (case-insensitive)')]
+DocRepoId = Annotated[uuid.UUID, Path(description="Repository id")]
 LanId = Annotated[str, Path(min_length=1, max_length=64, description="LAN ID (case-insensitive)")]
-
-DEPARTMENT_ADMIN = ("DEPARTMENT_ADMIN",)
-ANY_DOC_REPO_ROLE = ("MAKER", "CHECKER", "VIEWER")
-_403 = {403: {"description": "Caller lacks the required role"}}
-_404 = {404: {"description": "No such doc-repo"}}
+DOC_HUB = Root(SystemCode.DOC_HUB)
 
 
-def _out(doc_repo: DocRepo, access: service.DocRepoAccess, document_count: int) -> DocRepoOut:
+def at_repo(param: str = "doc_repo_id") -> Param:
+    return Param(param, service.repo_node)
+
+
+def ref(u: AppUser | None) -> PersonRef | None:
+    return PersonRef(lan_id=u.lan_id, display_name=u.display_name) if u else None
+
+
+def repo_out(db: Db, item: service.RepoWithAccess) -> DocRepoOut:
+    r, a = item.repo, item.access
+    owners = access.holders_of(db, r.hierarchy_node_id, RoleCode.OWNER)
     return DocRepoOut(
-        id=doc_repo.id,
-        name=doc_repo.name,
-        description=doc_repo.description,
-        department=DepartmentRef(code=doc_repo.department.code, name=doc_repo.department.name),
-        department_metadata=DepartmentMetadata(**doc_repo.department_metadata),
-        repository_metadata=[MetadataPair(**m) for m in doc_repo.repository_metadata],
-        created_by=doc_repo.created_by.display_name if doc_repo.created_by else None,
-        created_at=doc_repo.created_at,
-        updated_at=doc_repo.updated_at,
-        document_count=document_count,
+        id=r.id, node_id=r.hierarchy_node_id, name=r.node.name, description=r.description,
+        metadata=[MetadataPair(label=e.field.label, value=e.value) for e in metadata.node_entries(db, r.hierarchy_node_id)],
+        owner=ref(owners[0]) if owners else None, created_by=ref(r.created_by),
+        created_at=r.created_at, updated_at=r.updated_at, deleted_at=r.node.deleted_at,
+        document_count=item.document_count,
         access=DocRepoAccessOut(
-            manage=access.manage,
-            view_details=access.view_details,
-            view_documents=access.view_documents,
-            upload=access.upload,
-            review=access.review,
-            doc_repo_roles=[r for r in ANY_DOC_REPO_ROLE if r in access.doc_repo_roles],
-        ),
+            roles=sorted(a.roles), view=a.has(P.REPO_VIEW), edit=a.has(P.REPO_EDIT),
+            manage_members=a.has(P.MEMBERS_MANAGE), delete=a.has(P.NODE_DELETE), transfer=a.has(P.NODE_TRANSFER),
+            upload=a.has(P.DOC_UPLOAD), activity=a.has(P.AUDIT_VIEW)),
     )
 
 
-def _out_for(db: Db, p: Principal, doc_repo: DocRepo) -> DocRepoOut:
-    access = service.access_to(db, p, doc_repo)
-    return _out(doc_repo, access, visible_counts(db, [(doc_repo.id, access)])[doc_repo.id])
+def me(db: Db, p: CurrentUser) -> AppUser:
+    return access.require_user(db, p.lan_id)
 
 
-# --------------------------------------------------------------------------- doc-repos
-
-
-@router.get("/doc-repos", response_model=list[DocRepoOut], responses=_403)
-@SystemRoles("PUBLIC")
+@router.get("/doc-repos", response_model=list[DocRepoOut])
+@Can(P.REPO_LIST, at=DOC_HUB)
 def list_doc_repos(db: Db, p: CurrentUser) -> list[DocRepoOut]:
-    """Every doc-repo, most recently updated first, for callers with the PUBLIC system role.
-    `access.view_details` says whether the caller can open it."""
-    items = service.list_doc_repos(db, p)
-    counts = visible_counts(db, [(i.doc_repo.id, i.access) for i in items])
-    return [_out(i.doc_repo, i.access, counts[i.doc_repo.id]) for i in items]
+    """Every repository, most recently updated first. `access.view` says whether the caller can open it."""
+    return [repo_out(db, i) for i in service.list_repos(db, me(db, p))]
 
 
-@router.get("/doc-repos/departments", response_model=list[DepartmentRef])
-def creatable_departments(db: Db, p: CurrentUser) -> list[DepartmentRef]:
-    """Departments the caller administers, i.e. can create doc-repos in."""
-    return [DepartmentRef(code=d.code, name=d.name) for d in service.manageable_departments(db, p)]
+@router.post("/doc-repos", response_model=DocRepoOut, status_code=status.HTTP_201_CREATED,
+             responses={409: {"description": "A repository with this name exists"}})
+@Can(P.REPO_CREATE, at=DOC_HUB)  # Doc Hub admins
+@PlatformAdmin  # or platform admins
+def create_doc_repo(body: DocRepoCreate, db: Db, p: CurrentUser, response: Response) -> DocRepoOut:
+    """Create a repository. You become its owner; the default team grants apply."""
+    user = me(db, p)
+    fields = [(m.label, m.value) for m in body.metadata] if body.metadata is not None else None
+    repo = service.create_repo(db, user, body.name, body.description, fields)
+    response.headers["Location"] = f"/api/doc-repos/{repo.id}"
+    return repo_out(db, service.with_access(db, user, repo))
 
 
-@router.post(
-    "/departments/{code}/doc-repos",
-    status_code=status.HTTP_201_CREATED,
-    response_model=DocRepoOut,
-    responses={**_403, 404: {"description": "No such department"},
-               409: {"description": "The department already has a doc-repo with this name"}},
-)
-@OrgUnitRoles("DEPARTMENT_ADMIN", department="code")
-def create_doc_repo(code: DepartmentCode, body: DocRepoIn, db: Db, p: CurrentUser, response: Response) -> DocRepoOut:
-    """Create a doc-repo in the department, with its department metadata."""
-    doc_repo = service.create_doc_repo(db, p.lan_id, code, service.DocRepoFields(**body.model_dump()))
-    response.headers["Location"] = f"/api/doc-repos/{doc_repo.id}"
-    return _out_for(db, p, doc_repo)
+@router.get("/doc-repos/deleted", response_model=list[DocRepoOut])
+@PlatformAdmin
+def list_deleted(db: Db, p: CurrentUser) -> list[DocRepoOut]:
+    """Deleted repositories, newest first (platform admins can restore them)."""
+    user = me(db, p)
+    return [repo_out(db, service.with_access(db, user, r)) for r in service.list_deleted(db)]
 
 
-@router.get("/doc-repos/{doc_repo_id}", response_model=DocRepoOut, responses={**_403, **_404})
-@DocRepoRoles(*ANY_DOC_REPO_ROLE, department_roles=("DEPARTMENT_ADMIN", "VIEWER"))
+@router.get("/doc-repos/{doc_repo_id}", response_model=DocRepoOut)
+@Can(P.REPO_VIEW, at=at_repo())
 def get_doc_repo(doc_repo_id: DocRepoId, db: Db, p: CurrentUser) -> DocRepoOut:
-    """One doc-repo, with what the caller can do with it."""
-    return _out_for(db, p, service.get_doc_repo(db, doc_repo_id))
+    user = me(db, p)
+    return repo_out(db, service.with_access(db, user, service.get_repo(db, doc_repo_id)))
 
 
-@router.put(
-    "/doc-repos/{doc_repo_id}",
-    response_model=DocRepoOut,
-    responses={**_403, **_404, 409: {"description": "The department already has a doc-repo with this name"}},
-)
-@DocRepoRoles(department_roles=DEPARTMENT_ADMIN)
+@router.put("/doc-repos/{doc_repo_id}", response_model=DocRepoOut)
+@Can(P.REPO_EDIT, at=at_repo())
 def update_doc_repo(doc_repo_id: DocRepoId, body: DocRepoIn, db: Db, p: CurrentUser) -> DocRepoOut:
-    """Replace the doc-repo's name, description and department metadata."""
-    doc_repo = service.update_doc_repo(db, doc_repo_id, service.DocRepoFields(**body.model_dump()))
-    return _out_for(db, p, doc_repo)
+    user = me(db, p)
+    repo = service.update_repo(db, user, service.get_repo(db, doc_repo_id), body.name, body.description)
+    return repo_out(db, service.with_access(db, user, repo))
 
 
-@router.delete("/doc-repos/{doc_repo_id}", status_code=status.HTTP_204_NO_CONTENT, responses={**_403, **_404})
-@DocRepoRoles(department_roles=DEPARTMENT_ADMIN)
-def delete_doc_repo(doc_repo_id: DocRepoId, db: Db) -> Response:
-    """Delete the doc-repo and its members."""
-    service.delete_doc_repo(db, doc_repo_id)
+@router.put("/doc-repos/{doc_repo_id}/metadata", response_model=list[MetadataPair])
+@Can(P.REPO_EDIT, at=at_repo())
+def set_metadata(doc_repo_id: DocRepoId, body: list[MetadataPair], db: Db, p: CurrentUser) -> list[MetadataPair]:
+    """Make the repository's metadata fields exactly these, in this order. Documents not yet approved
+    get the new values (unless the maker changed them); approved ones keep theirs."""
+    repo = service.get_repo(db, doc_repo_id)
+    service.set_repo_metadata(db, me(db, p), repo, [(m.label, m.value) for m in body])
+    return [MetadataPair(label=e.field.label, value=e.value) for e in metadata.node_entries(db, repo.hierarchy_node_id)]
+
+
+@router.delete("/doc-repos/{doc_repo_id}", status_code=status.HTTP_204_NO_CONTENT)
+@Can(P.NODE_DELETE, at=at_repo())
+def delete_doc_repo(doc_repo_id: DocRepoId, db: Db, p: CurrentUser) -> Response:
+    """Soft delete (owner only): it's hidden and its pending approvals are cancelled; everything is kept."""
+    service.delete_repo(db, me(db, p), service.get_repo(db, doc_repo_id))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/doc-repos/{doc_repo_id}/restore", response_model=DocRepoOut)
+@PlatformAdmin
+def restore_doc_repo(doc_repo_id: DocRepoId, db: Db, p: CurrentUser) -> DocRepoOut:
+    user = me(db, p)
+    repo = service.restore_repo(db, user, service.get_repo(db, doc_repo_id, include_deleted=True))
+    return repo_out(db, service.with_access(db, user, repo))
 
 
 # --------------------------------------------------------------------------- members
 
 
-def _member_out(m: service.Member) -> MemberOut:
-    return MemberOut(lan_id=m.user.lan_id, display_name=m.user.display_name, email=m.user.email,
-                     title=m.user.title, roles=m.roles)
+def group_out(v: access.GroupView) -> GroupOut:
+    g = v.group
+    return GroupOut(id=g.id, name=g.name, default=v.default, member_count=v.member_count,
+                    created_at=g.created_at, updated_at=g.updated_at)
 
 
-@router.get("/doc-repos/{doc_repo_id}/members", response_model=list[MemberOut], responses={**_403, **_404})
-@DocRepoRoles(department_roles=DEPARTMENT_ADMIN)
-def list_members(doc_repo_id: DocRepoId, db: Db) -> list[MemberOut]:
-    """The doc-repo's members and their roles. The department's admin isn't listed: they're a viewer
-    of every doc-repo by default."""
-    return [_member_out(m) for m in service.list_members(db, doc_repo_id)]
+def repo_member_out(m: access.Member) -> RepoMemberOut:
+    return RepoMemberOut(**member_out(m).model_dump(), added_at=m.added_at, updated_at=m.updated_at,
+                         groups=[MemberGroupOut(id=mg.group.id, name=mg.group.name, roles=mg.roles) for mg in m.groups])
 
 
-@router.put(
-    "/doc-repos/{doc_repo_id}/members/{lan_id}",
-    response_model=MemberOut,
-    responses={**_403, 404: {"description": "No such doc-repo or user"},
-               409: {"description": "MAKER and CHECKER together"}},
-)
-@DocRepoRoles(department_roles=DEPARTMENT_ADMIN)
-def set_member_roles(doc_repo_id: DocRepoId, lan_id: LanId, body: MemberRolesIn, db: Db, p: CurrentUser) -> MemberOut:
-    """Make the user's roles in the doc-repo exactly `roles`. Takes effect immediately."""
-    return _member_out(service.set_member_roles(db, p.lan_id, doc_repo_id, lan_id, body.roles))
+def _group_view(db: Db, node_id: uuid.UUID, group_id: uuid.UUID) -> GroupOut:
+    return group_out(next(v for v in access.repo_groups(db, node_id) if v.group.id == group_id))
 
 
-@router.delete(
-    "/doc-repos/{doc_repo_id}/members/{lan_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    responses={**_403, 404: {"description": "No such doc-repo or user"}},
-)
-@DocRepoRoles(department_roles=DEPARTMENT_ADMIN)
-def remove_member(doc_repo_id: DocRepoId, lan_id: LanId, db: Db, p: CurrentUser) -> Response:
-    """Remove the user from the doc-repo."""
-    service.set_member_roles(db, p.lan_id, doc_repo_id, lan_id, [])
+@router.get("/doc-repos/{doc_repo_id}/groups", response_model=GroupsOut)
+@Can(P.MEMBERS_MANAGE, at=at_repo())
+def list_groups(doc_repo_id: DocRepoId, db: Db) -> GroupsOut:
+    node_id = service.get_repo(db, doc_repo_id).hierarchy_node_id
+    return GroupsOut(groups=[group_out(v) for v in access.repo_groups(db, node_id)],
+                     grantable_roles=[r.value for r in REPO_GROUP_ROLES])
+
+
+@router.post("/doc-repos/{doc_repo_id}/groups", response_model=GroupOut, status_code=status.HTTP_201_CREATED,
+             responses={409: {"description": "Name taken"}})
+@Can(P.MEMBERS_MANAGE, at=at_repo())
+def create_group(doc_repo_id: DocRepoId, body: GroupIn, db: Db, p: CurrentUser) -> GroupOut:
+    """A new user group (a name); people are put in it with their own roles."""
+    node = service.get_repo(db, doc_repo_id).node
+    group = access.create_group(db, me(db, p), node, body.name)
+    return _group_view(db, node.id, group.id)
+
+
+@router.put("/doc-repos/{doc_repo_id}/groups/{group_id}", response_model=GroupOut,
+            responses={409: {"description": "Name taken"}})
+@Can(P.MEMBERS_MANAGE, at=at_repo())
+def update_group(doc_repo_id: DocRepoId, group_id: uuid.UUID, body: GroupIn, db: Db, p: CurrentUser) -> GroupOut:
+    """Rename the group."""
+    node = service.get_repo(db, doc_repo_id).node
+    group = access.update_group(db, me(db, p), node, group_id, body.name)
+    return _group_view(db, node.id, group.id)
+
+
+@router.delete("/doc-repos/{doc_repo_id}/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT,
+               responses={409: {"description": "The default group"}})
+@Can(P.MEMBERS_MANAGE, at=at_repo())
+def delete_group(doc_repo_id: DocRepoId, group_id: uuid.UUID, db: Db, p: CurrentUser) -> Response:
+    """Delete the user group: everyone in it loses the roles they held in it, at once."""
+    access.delete_group(db, me(db, p), service.get_repo(db, doc_repo_id).node, group_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/doc-repos/{doc_repo_id}/members", response_model=MembersOut)
+@Can(P.MEMBERS_MANAGE, at=at_repo())
+def list_members(doc_repo_id: DocRepoId, db: Db) -> MembersOut:
+    node_id = service.get_repo(db, doc_repo_id).hierarchy_node_id
+    return MembersOut(
+        members=[repo_member_out(m) for m in access.list_members(db, node_id)],
+        team_grants=[TeamGrantOut(team=g.team_code, team_name=g.team_name, role=g.role, from_default=g.from_default)
+                     for g in access.team_grants(db, node_id)],
+        groups=[group_out(v) for v in access.repo_groups(db, node_id)],
+        grantable_roles=[r.value for r in REPO_GROUP_ROLES],
+    )
+
+
+@router.put("/doc-repos/{doc_repo_id}/members/{lan_id}", response_model=RepoMemberOut)
+@Can(P.MEMBERS_MANAGE, at=at_repo())
+def set_member_groups(doc_repo_id: DocRepoId, lan_id: LanId, body: MemberGroupsIn, db: Db,
+                      p: CurrentUser) -> RepoMemberOut:
+    """Make the person's user groups and roles here exactly these. Takes effect at once."""
+    node = service.get_repo(db, doc_repo_id).node
+    assignments = {g.id: g.roles for g in body.groups}
+    return repo_member_out(access.set_member_groups(db, me(db, p), node, lan_id, assignments))
+
+
+@router.delete("/doc-repos/{doc_repo_id}/members/{lan_id}", status_code=status.HTTP_204_NO_CONTENT)
+@Can(P.MEMBERS_MANAGE, at=at_repo())
+def remove_member(doc_repo_id: DocRepoId, lan_id: LanId, db: Db, p: CurrentUser) -> Response:
+    """Take the person out of every user group here (the owner stays: ownership moves only by hand-over)."""
+    access.set_member_groups(db, me(db, p), service.get_repo(db, doc_repo_id).node, lan_id, {})
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.put("/doc-repos/{doc_repo_id}/owner", status_code=status.HTTP_204_NO_CONTENT)
+@Can(P.NODE_TRANSFER, at=at_repo())
+def transfer(doc_repo_id: DocRepoId, body: OwnerIn, db: Db, p: CurrentUser) -> Response:
+    """Hand ownership to someone else; you stay as an admin."""
+    access.transfer_ownership(db, me(db, p), service.get_repo(db, doc_repo_id).node, body.lan_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --------------------------------------------------------------------------- the repository's workflow
+
+
+def _choice(db: Db, wf) -> WorkflowChoice | None:
+    latest = workflows.latest_version(db, wf.id)
+    if latest is None:
+        return None
+    steps = latest.definition.get("steps", [])
+    return WorkflowChoice(id=wf.id, code=wf.code, name=wf.name, version=latest.version, steps=[
+        WorkflowStepBrief(id=x["id"], name=x["name"], type=x["type"], user_group=(x.get("role") or {}).get("user_group"),
+                          role=(x.get("role") or {}).get("role"), on=x.get("on", {})) for x in steps])
+
+
+def _repo_workflow(db: Db, node_id: uuid.UUID) -> RepoWorkflowOut:
+    current = workflows.bound_definition(db, node_id, workflow_steps.KIND)
+    options = [c for c in (_choice(db, wf) for wf in workflows.definitions(db, workflow_steps.KIND)) if c]
+    db.commit()  # the shipped default flow, if it was just created
+    chosen = _choice(db, current) if current else None
+    groups = {s.user_group for s in (chosen.steps if chosen else []) if s.user_group}
+    missing = sorted(g for g in groups if access.group_named(db, node_id, g) is None)
+    return RepoWorkflowOut(current=chosen, options=options, missing_groups=missing)
+
+
+@router.get("/doc-repos/{doc_repo_id}/workflow", response_model=RepoWorkflowOut)
+@Can(P.REPO_EDIT, at=at_repo())
+def get_repo_workflow(doc_repo_id: DocRepoId, db: Db) -> RepoWorkflowOut:
+    return _repo_workflow(db, service.get_repo(db, doc_repo_id).hierarchy_node_id)
+
+
+@router.put("/doc-repos/{doc_repo_id}/workflow", response_model=RepoWorkflowOut,
+            responses={404: {"description": "No such workflow"}, 422: {"description": "Not a document workflow"}})
+@Can(P.REPO_EDIT, at=at_repo())
+def set_repo_workflow(doc_repo_id: DocRepoId, body: RepoWorkflowIn, db: Db, p: CurrentUser) -> RepoWorkflowOut:
+    """New submissions here use this workflow (its latest version). Requests already running keep theirs."""
+    node_id = service.get_repo(db, doc_repo_id).hierarchy_node_id
+    wf = workflows.get_definition(db, body.workflow_id)
+    if wf.kind != workflow_steps.KIND:
+        raise InvalidRequest(f"{wf.name} isn't a document workflow.")
+    user = me(db, p)
+    previous = workflows.bound_definition(db, node_id, workflow_steps.KIND)
+    workflows.bind(db, node_id, wf.id, user.id)
+    if previous is None or previous.id != wf.id:
+        access.record(db, user, "REPO_WORKFLOW_SET", "node", str(node_id), node_id,
+                      {"before": previous.code if previous else None, "after": wf.code,
+                       "version": workflows.latest_version(db, wf.id).version}, source_system="WORKFLOWS")
+    db.commit()
+    return _repo_workflow(db, node_id)

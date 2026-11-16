@@ -149,3 +149,37 @@ export const CheckIcon = () => (
   </svg>
 );
 
+
+/** Approvals: a clipboard with a tick. */
+export const ApprovalsIcon = () => (
+  <svg {...base}>
+    <path d="M9 4h6v3H9z" />
+    <path d="M15 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2" />
+    <path d="M9 14l2 2 4-4" />
+  </svg>
+);
+
+/** Review: an eye. */
+export const EyeIcon = () => (
+  <svg {...base}>
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+
+/** Approval workflows: steps joined by a line. */
+export const WorkflowIcon = () => (
+  <svg {...base}>
+    <rect x="3" y="3" width="6" height="6" rx="1" />
+    <rect x="15" y="15" width="6" height="6" rx="1" />
+    <path d="M6 9v4a2 2 0 0 0 2 2h7" />
+  </svg>
+);
+
+/** Audit: a shield with a tick. */
+export const AuditIcon = () => (
+  <svg {...base}>
+    <path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z" />
+    <path d="M9 12l2 2 4-4" />
+  </svg>
+);

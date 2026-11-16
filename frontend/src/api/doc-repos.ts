@@ -1,79 +1,105 @@
-/** Document & metadata management: doc-repos (a department's logical group of documents). */
+/** Document repositories: DOC_REPO nodes under the Doc Hub root. */
 
-import type { MetadataPair } from "./documents";
+import type { Member } from "./access";
 import { api } from "./http";
 
-export type DocRepoRole = "MAKER" | "CHECKER" | "VIEWER";
-export const DOC_REPO_ROLES: DocRepoRole[] = ["MAKER", "CHECKER", "VIEWER"];
-export const DOC_REPO_ROLE_NAMES: Record<DocRepoRole, string> = { MAKER: "Maker", CHECKER: "Checker", VIEWER: "Viewer" };
-
-export interface DepartmentRef {
-  code: string;
-  name: string;
+export interface MetadataPair {
+  label: string;
+  value: string;
 }
 
-/** Department metadata: copied onto each of the doc-repo's documents (a maker can override it per document). */
-export interface DepartmentMetadata {
-  department: string;
-  business_unit: string;
-  country: string;
+export interface PersonRef {
+  lan_id: string;
+  display_name: string;
 }
 
-export const DEPARTMENT_METADATA_LABELS: Record<keyof DepartmentMetadata, string> = {
-  department: "Department",
-  business_unit: "Business unit",
-  country: "Country",
-};
-
-export const DEPARTMENT_METADATA_KEYS = Object.keys(DEPARTMENT_METADATA_LABELS) as (keyof DepartmentMetadata)[];
-
-export interface DocRepoFields {
+export interface DocRepo {
+  id: string;
+  node_id: string;
   name: string;
   description: string;
-  department_metadata: DepartmentMetadata; // an empty department becomes the department's name
-}
-
-export interface DocRepo extends DocRepoFields {
-  id: number;
-  repository_metadata: MetadataPair[]; // set on the Metadata tab
-  department: DepartmentRef;
-  created_by: string | null;
+  metadata: MetadataPair[]; // every document here inherits these
+  owner: PersonRef | null;
+  created_by: PersonRef | null;
   created_at: string;
   updated_at: string;
-  document_count: number; // documents in it the caller may see
-  /** What the caller can do (for the UI; the server checks again on every request). */
+  deleted_at: string | null;
+  document_count: number; // documents the caller may see
+  /** What the caller can do here (for the UI; the server checks again). */
   access: {
-    manage: boolean; // department admin: edit, delete, members
-    view_details: boolean; // can open its page (a doc-repo role, or department viewer / admin)
-    view_documents: boolean;
-    upload: boolean; // doc-repo maker
-    review: boolean; // doc-repo checker
-    doc_repo_roles: DocRepoRole[];
+    roles: string[];
+    view: boolean;
+    edit: boolean;
+    manage_members: boolean;
+    delete: boolean; // owner only
+    transfer: boolean; // owner only
+    upload: boolean; // maker
+    activity: boolean; // see the repository's activity (audit.trail.view)
   };
 }
 
-export interface Member {
-  lan_id: string;
-  display_name: string;
-  email: string;
-  title: string;
-  roles: DocRepoRole[];
+export interface TeamGrant {
+  team: string;
+  team_name: string;
+  role: string;
+  from_default: boolean;
+}
+
+/** One of a repository's user groups: a name; each person in it holds their own roles there. */
+export interface RepoGroup {
+  id: string;
+  name: string;
+  default: boolean; // the default group ("Users"): holds the owner
+  member_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A repository member, with the user groups they're in and their roles in each. */
+export interface RepoMember extends Member {
+  groups: { id: string; name: string; roles: string[] }[];
+  added_at: string | null;
+  updated_at: string | null;
+}
+
+export interface Members {
+  members: RepoMember[];
+  team_grants: TeamGrant[];
+  groups: RepoGroup[];
+  grantable_roles: string[]; // roles a person can be given in a user group
+}
+
+export interface Groups {
+  groups: RepoGroup[];
+  grantable_roles: string[];
 }
 
 const seg = encodeURIComponent;
 const json = (body: unknown) => JSON.stringify(body);
 
 export const listDocRepos = (t: string) => api<DocRepo[]>(t, "/doc-repos");
-export const creatableDepartments = (t: string) => api<DepartmentRef[]>(t, "/doc-repos/departments");
-export const getDocRepo = (t: string, id: number) => api<DocRepo>(t, `/doc-repos/${id}`);
-export const createDocRepo = (t: string, departmentCode: string, body: DocRepoFields) =>
-  api<DocRepo>(t, `/departments/${seg(departmentCode)}/doc-repos`, { method: "POST", body: json(body) });
-export const updateDocRepo = (t: string, id: number, body: DocRepoFields) =>
+export const listDeletedDocRepos = (t: string) => api<DocRepo[]>(t, "/doc-repos/deleted");
+export const getDocRepo = (t: string, id: string) => api<DocRepo>(t, `/doc-repos/${id}`);
+export const createDocRepo = (t: string, body: { name: string; description: string }) =>
+  api<DocRepo>(t, "/doc-repos", { method: "POST", body: json(body) });
+export const updateDocRepo = (t: string, id: string, body: { name: string; description: string }) =>
   api<DocRepo>(t, `/doc-repos/${id}`, { method: "PUT", body: json(body) });
-export const deleteDocRepo = (t: string, id: number) => api<void>(t, `/doc-repos/${id}`, { method: "DELETE" });
+export const setRepoMetadata = (t: string, id: string, pairs: MetadataPair[]) =>
+  api<MetadataPair[]>(t, `/doc-repos/${id}/metadata`, { method: "PUT", body: json(pairs) });
+export const deleteDocRepo = (t: string, id: string) => api<void>(t, `/doc-repos/${id}`, { method: "DELETE" });
+export const restoreDocRepo = (t: string, id: string) => api<DocRepo>(t, `/doc-repos/${id}/restore`, { method: "POST" });
 
-export const listMembers = (t: string, id: number) => api<Member[]>(t, `/doc-repos/${id}/members`);
-export const setMemberRoles = (t: string, id: number, lanId: string, roles: DocRepoRole[]) =>
-  api<Member>(t, `/doc-repos/${id}/members/${seg(lanId)}`, { method: "PUT", body: json({ roles }) });
-export const removeMember = (t: string, id: number, lanId: string) =>
+export const listMembers = (t: string, id: string) => api<Members>(t, `/doc-repos/${id}/members`);
+/** Their user groups and roles here, exactly these ([] for a group takes them out of it). */
+export const setMemberGroups = (t: string, id: string, lanId: string, groups: { id: string; roles: string[] }[]) =>
+  api<RepoMember>(t, `/doc-repos/${id}/members/${seg(lanId)}`, { method: "PUT", body: json({ groups }) });
+export const removeMember = (t: string, id: string, lanId: string) =>
   api<void>(t, `/doc-repos/${id}/members/${seg(lanId)}`, { method: "DELETE" });
+
+export const listGroups = (t: string, id: string) => api<Groups>(t, `/doc-repos/${id}/groups`);
+export const createGroup = (t: string, id: string, body: { name: string }) =>
+  api<RepoGroup>(t, `/doc-repos/${id}/groups`, { method: "POST", body: json(body) });
+export const updateGroup = (t: string, id: string, groupId: string, body: { name: string }) =>
+  api<RepoGroup>(t, `/doc-repos/${id}/groups/${groupId}`, { method: "PUT", body: json(body) });
+export const deleteGroup = (t: string, id: string, groupId: string) =>
+  api<void>(t, `/doc-repos/${id}/groups/${groupId}`, { method: "DELETE" });

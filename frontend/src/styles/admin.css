@@ -623,3 +623,229 @@
   text-align: left;
   font-weight: 400;
 }
+
+/* Who a form is about, when it can't be changed: name, then LAN ID. */
+.person-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.person-head__name {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.person-head__id {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+/* A compact grid of tick boxes: one row per group, its options in up to three columns. */
+.perm-grid {
+  display: grid;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  font-size: var(--fs-sm);
+}
+
+.perm-grid__row {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  gap: var(--sp-5);
+  align-items: start;
+}
+
+.perm-grid__group {
+  text-align: right;
+  color: var(--text-secondary);
+  line-height: 24px;
+  overflow-wrap: anywhere;
+}
+
+.perm-grid__options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--sp-2) var(--sp-5);
+}
+
+.perm-grid__option {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 24px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Not a text input: undo .form-field input's height, padding and border. */
+.form-field .perm-grid__option input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  border-radius: 3px;
+  accent-color: var(--brand-red);
+}
+
+@media (max-width: 640px) {
+  .perm-grid__row {
+    grid-template-columns: 1fr;
+    gap: var(--sp-1);
+  }
+
+  .perm-grid__group {
+    text-align: left;
+  }
+
+  .perm-grid__options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.form-grid > .check {
+  font-size: var(--fs-sm);
+}
+
+/* A row for someone whose access is switched off. */
+.row--muted td {
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.members-table th,
+.members-table td {
+  white-space: nowrap;
+}
+
+/* One line per item inside a table cell, aligned across neighbouring cells. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.panel__head--end {
+  justify-content: flex-end;
+}
+
+.panel__actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+  align-items: flex-start;
+}
+
+.panel__subtitle {
+  margin: var(--sp-5) 0 var(--sp-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+
+.plain-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.plain-list--tight {
+  gap: 2px;
+  font-size: var(--fs-xs);
+}
+
+.inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+  margin-top: var(--sp-3);
+}
+
+.inline-form input,
+.inline-form select {
+  height: 36px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm, 6px);
+  font: inherit;
+  font-size: var(--fs-sm);
+  min-width: 200px;
+}
+
+/* ---------- Teams ---------- */
+.team-add {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.team-add input {
+  flex: 1;
+}
+
+.team-members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.team-members li {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 2px 0 var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--gray-050);
+}
+
+.team-roles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.team-role {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  cursor: pointer;
+}
+
+.team-role input {
+  accent-color: var(--brand-red);
+  margin-top: 3px;
+}
+
+.team-role > span {
+  display: flex;
+  flex-direction: column;
+}
+
+.team-role__hint {
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
+
+.pager__gap {
+  min-width: 24px;
+  color: var(--text-secondary);
+  text-align: center;
+}

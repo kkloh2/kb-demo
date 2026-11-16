@@ -8,6 +8,8 @@ export interface NavItem {
   key: string;
   label: string;
   icon: ReactNode;
+  /** Pages under this one, shown indented beneath it (e.g. Approvals > Workflows). */
+  children?: NavItem[];
 }
 
 interface Props {
@@ -70,6 +72,24 @@ export function Sidebar({ user, items, active, collapsed, onToggle, onNavigate, 
                 {item.icon}
                 <span className="nav-item__label">{item.label}</span>
               </button>
+              {item.children && item.children.length > 0 && (
+                <ul className="nav-list nav-list--sub">
+                  {item.children.map((child) => (
+                    <li key={child.key}>
+                      <button
+                        type="button"
+                        className="nav-item nav-item--sub"
+                        aria-current={child.key === active ? "page" : undefined}
+                        onClick={() => onNavigate(child.key)}
+                        title={collapsed ? child.label : undefined}
+                      >
+                        {child.icon}
+                        <span className="nav-item__label">{child.label}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </li>
           ))}
         </ul>

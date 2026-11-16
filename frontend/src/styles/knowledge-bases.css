@@ -612,3 +612,9 @@ a.kb-card__name:focus-visible {
   border-radius: var(--radius);
   box-shadow: var(--focus-ring);
 }
+
+.pager__gap {
+  min-width: 24px;
+  color: var(--text-secondary);
+  text-align: center;
+}

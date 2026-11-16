@@ -5,7 +5,7 @@ import { Menu, type MenuItem } from "../../components/Menu";
 import { Pager, usePagination } from "../../components/Pager";
 import { timeAgo } from "../../lib/time";
 
-type SortKey = "name" | "department" | "updated_at";
+type SortKey = "name" | "created_by" | "updated_at";
 type SortDir = "asc" | "desc";
 
 interface Props {
@@ -19,7 +19,7 @@ export function DocRepoTable({ items, menuItems }: Props) {
 
   const sorted = useMemo(() => {
     const value = (p: DocRepo) =>
-      sort.key === "department" ? p.department.name.toLowerCase()
+      sort.key === "created_by" ? (p.created_by?.display_name ?? "").toLowerCase()
       : sort.key === "name" ? p.name.toLowerCase()
       : p.updated_at;
     const out = [...items].sort((a, b) => (value(a) < value(b) ? -1 : value(a) > value(b) ? 1 : 0));
@@ -67,7 +67,7 @@ export function DocRepoTable({ items, menuItems }: Props) {
           <tr>
             {header("Repository name", "name")}
             {header("Description")}
-            {header("Department", "department")}
+            {header("Created by", "created_by")}
             {header("Last updated", "updated_at")}
             <th scope="col">
               <span className="sr-only">Actions</span>
@@ -79,12 +79,12 @@ export function DocRepoTable({ items, menuItems }: Props) {
             <tr key={p.id}>
               <td>
                 <div className="kb-table__name">
-                  {p.access.view_details ? (
+                  {p.access.view ? (
                     <a className="kb-table__link" href={`#doc-repo/${p.id}`}>
                       {p.name}
                     </a>
                   ) : (
-                    <span className="kb-table__locked" title={`Listed for everyone. To open it, ask a department admin of ${p.department.name} for a role.`}>
+                    <span className="kb-table__locked" title={`Listed for everyone. To open it, ask its owner${p.owner ? ` (${p.owner.display_name})` : ""} for a role.`}>
                       {p.name}
                       <span className="kb-badge">No access</span>
                     </span>
@@ -92,10 +92,10 @@ export function DocRepoTable({ items, menuItems }: Props) {
                 </div>
               </td>
               <td className="kb-table__truncate">{p.description}</td>
-              <td className="kb-table__truncate">{p.department.name}</td>
+              <td className="kb-table__truncate">{p.created_by?.display_name ?? "—"}</td>
               <td title={new Date(p.updated_at).toLocaleString()}>{timeAgo(p.updated_at)}</td>
               <td className="kb-table__actions">
-                {p.access.manage && (
+                {menuItems(p).length > 0 && (
                   <Menu
                     trigger={(props) => (
                       <button type="button" className="kb-icon-btn kb-icon-btn--brand"

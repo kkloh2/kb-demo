@@ -56,25 +56,31 @@ Db = Annotated[Session, Depends(get_db)]
 def register_models() -> None:
     """Import every feature's models so Base.metadata knows their tables."""
     import app.auth.models  # noqa: F401
-    import app.users.models  # noqa: F401
+    import app.sources.models  # noqa: F401
+    import app.access.models  # noqa: F401
+    import app.approvals.models  # noqa: F401
     import app.documents.models  # noqa: F401
+    import app.workflows.models  # noqa: F401
+    import app.audit.models  # noqa: F401
 
 
 def _reference_data(db: Session) -> None:
-    """Data every database needs, kept in sync with the code at every start-up."""
-    from app.users.seed import seed_system_admins
-    from app.users.service import sync_roles
+    """Data every database needs, kept in sync with the code at every start-up: source systems and
+    their roots, roles, permissions, teams, approval types, audit actions, and the first platform admins."""
+    import app.main  # noqa: F401  (registers every feature's audit actions, step types ...)
+    from app.access.service import seed_platform_admins, sync_reference
+    from app.approvals.service import sync_types
+    from app.audit.service import sync_actions
 
-    sync_roles(db)
-    db.flush()
-    seed_system_admins(db)
+    sync_reference(db)
+    sync_types(db)
+    sync_actions(db)
+    seed_platform_admins(db)
 
 
 def _seed(db: Session) -> None:
-    """Demo data, added only to an empty database. Users need none: they come from the directory."""
-    from app.users.seed import seed_departments
-
-    seed_departments(db)
+    """Demo data, added only to an empty database. None for now: people come from the directory,
+    and platform admins set up the rest in the app."""
 
 
 def init_db() -> None:
