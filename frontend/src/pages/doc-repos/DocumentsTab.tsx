@@ -389,9 +389,7 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
                         <span className="truncate">{f.name}</span>
                       </button>
                     </td>
-                    <td className="muted" colSpan={4}>
-                      {f.count} document{f.count === 1 ? "" : "s"}
-                    </td>
+                    <td colSpan={4} />
                   </tr>
                 ))}
                 {rows.map((d) => (
