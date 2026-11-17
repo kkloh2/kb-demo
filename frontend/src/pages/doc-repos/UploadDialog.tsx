@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { uploadDocuments, type DocRepoDocument } from "../../api/documents";
-import { FileIcon, FolderIcon } from "../../components/Icons";
+import { FileIcon, FolderIcon, UploadIcon } from "../../components/Icons";
 import { MessageBar } from "../../components/MessageBar";
+import { FolderTree } from "./FolderTree";
 import { ALLOWED, extKind, extOf, folderLabel, plural } from "./docs-common";
 
 /** Upload new documents into a chosen folder, or (with `target`) a new version of one document. */
@@ -20,7 +21,8 @@ type Picked = { file: File; path: string }; // path inside the destination folde
 
 export function UploadDialog({ token, docRepoId, folders, initialFolder, target, onCancel, onUploaded, onError }: Props) {
   const [folder, setFolder] = useState(target ? target.folder : initialFolder);
-  const [newFolder, setNewFolder] = useState("");
+  const [created, setCreated] = useState<string[]>([]); // new folders, made by the upload
+  const [over, setOver] = useState(false); // something is being dragged over the drop area
   const [picked, setPicked] = useState<Picked[]>([]);
   const [leftOut, setLeftOut] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -33,8 +35,9 @@ export function UploadDialog({ token, docRepoId, folders, initialFolder, target,
     folderInput.current?.setAttribute("webkitdirectory", "");
   }, []);
 
-  const sub = newFolder.split("/").map((p) => p.trim()).filter(Boolean).join("/");
-  const destination = [folder, sub].filter(Boolean).join("/");
+  const destination = folder;
+  const known = [...new Set([...folders, ...created])].sort((a, b) => a.localeCompare(b));
+  const isNew = destination !== "" && !folders.includes(destination);
 
   function pick(list: FileList | null, fromFolder: boolean) {
     if (!list?.length) return;
@@ -81,79 +84,96 @@ export function UploadDialog({ token, docRepoId, folders, initialFolder, target,
 
   return (
     <>
-      <div className="modal__body upload-dialog">
-        {error && (
-          <MessageBar className="alert" role="alert" onClose={() => setError(null)}>
-            {error}
-          </MessageBar>
-        )}
-
-        {target ? (
-          <p className="modal__text">
-            Upload a new version of <strong>{target.filename}</strong> in {folderLabel(target.folder)}. It's a draft until
-            it's approved; version {target.version} stays published meanwhile.
-          </p>
-        ) : (
-          <div className="form-grid">
-            <label className="form-field">
-              <span>Upload to</span>
-              <select value={folder} onChange={(e) => setFolder(e.target.value)}>
-                <option value="">Top level</option>
-                {folders.map((f) => (
-                  <option key={f} value={f}>
-                    {folderLabel(f)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="form-field">
-              <span>New folder (optional)</span>
-              <input type="text" value={newFolder} onChange={(e) => setNewFolder(e.target.value)} maxLength={200}
-                placeholder="e.g. 2027" />
-              <small>Created inside the folder on the left.</small>
-            </label>
+      <div className={`modal__body upload-dialog${target ? "" : " upload-dialog--split"}`}>
+        {!target && (
+          <div className="upload-dialog__tree">
+            <span className="upload-dialog__label">Folders</span>
+            <FolderTree folders={known} value={folder} onChange={setFolder}
+              onNewFolder={(path) => setCreated((c) => (c.includes(path) ? c : [...c, path]))} />
           </div>
         )}
 
-        <div className="upload-dialog__pick">
-          <button type="button" className="btn-secondary" disabled={busy} onClick={() => filesInput.current?.click()}>
-            <FileIcon />
-            {target ? "Choose file" : "Choose files"}
-          </button>
-          {!target && (
-            <button type="button" className="btn-secondary" disabled={busy} onClick={() => folderInput.current?.click()}>
-              <FolderIcon />
-              Choose a folder
-            </button>
+        <div className="upload-dialog__main">
+          {error && (
+            <MessageBar className="alert" role="alert" onClose={() => setError(null)}>
+              {error}
+            </MessageBar>
           )}
-          <input ref={filesInput} type="file" multiple={!target}
-            accept={target ? extOf(target.filename) : ALLOWED.join(",")} hidden
-            onChange={(e) => pick(e.target.files, false)} data-testid="upload-files" />
-          <input ref={folderInput} type="file" multiple hidden onChange={(e) => pick(e.target.files, true)}
-            data-testid="upload-folder" />
-        </div>
 
-        {picked.length > 0 && (
-          <>
-            <p className="upload-dialog__summary">
-              {plural(picked.length, "file", "files")} to {target ? "upload" : `upload to ${folderLabel(destination)}`}
-              {leftOut ? ` · ${leftOut} left out (hidden, empty or not an allowed type)` : ""}. A file with the same name
-              in the same folder becomes a new version of it.
+          {target ? (
+            <p className="modal__text">
+              A new version of <strong>{target.filename}</strong> in {folderLabel(target.folder)}. It's a draft until it's
+              approved; version {target.version} stays published meanwhile.
             </p>
-            <ul className="selection-list">
-              {picked.slice(0, 200).map(({ file, path }) => (
-                <li key={path}>
-                  <span className={`doc-name__icon doc-name__icon--${extKind(file.name)}`}>
-                    <FileIcon />
+          ) : null}
+
+          <div className="form-field">
+            <span>{target ? "File" : "Files"}</span>
+            {!target && (
+              <p className="dest-line">
+                <FolderIcon />
+                <span className="truncate" title={folderLabel(destination)}>
+                  Files go into <strong>{folderLabel(destination)}</strong>
+                </span>
+                {isNew && <span className="badge badge--neutral">New folder</span>}
+              </p>
+            )}
+            {picked.length === 0 ? (
+              <div className={`upload-dialog__drop${over ? " upload-dialog__drop--over" : ""}`}
+                onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+                onDragLeave={() => setOver(false)}
+                onDrop={(e) => { e.preventDefault(); setOver(false); pick(e.dataTransfer.files, false); }}>
+                <UploadIcon />
+                <p>
+                  {target ? "Drag the new file here, or " : "Drag files here, or "}
+                  <button type="button" className="link-inline" disabled={busy} onClick={() => filesInput.current?.click()}>
+                    {target ? "choose a file" : "choose files"}
+                  </button>
+                  {!target && (
+                    <>
+                      {" or "}
+                      <button type="button" className="link-inline" disabled={busy} onClick={() => folderInput.current?.click()}>
+                        a folder
+                      </button>
+                    </>
+                  )}
+                </p>
+                <small>{target ? `A ${extOf(target.filename)} file` : `${ALLOWED.join(", ")} · up to 200 files`}</small>
+              </div>
+            ) : (
+              <div className="picked">
+                <div className="picked__head">
+                  <span>
+                    {plural(picked.length, "file", "files")}
+                    {leftOut ? ` · ${leftOut} left out (hidden, empty or not an allowed type)` : ""}
                   </span>
-                  <span className="selection-list__name" title={path}>{path}</span>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
+                  <button type="button" className="btn-link" disabled={busy}
+                    onClick={() => { setPicked([]); setLeftOut(0); }}>
+                    {target ? "Choose a different file" : "Choose different files"}
+                  </button>
+                </div>
+                <ul className="picked__list">
+                  {picked.slice(0, 200).map(({ file, path }) => (
+                    <li key={path}>
+                      <span className={`doc-name__icon doc-name__icon--${extKind(file.name)}`}>
+                        <FileIcon />
+                      </span>
+                      <span className="selection-list__name" title={path}>{path}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {!target && <small>A file with the same name in the same folder becomes a new version of it.</small>}
+            <input ref={filesInput} type="file" multiple={!target}
+              accept={target ? extOf(target.filename) : ALLOWED.join(",")} hidden
+              onChange={(e) => pick(e.target.files, false)} data-testid="upload-files" />
+            <input ref={folderInput} type="file" multiple hidden onChange={(e) => pick(e.target.files, true)}
+              data-testid="upload-folder" />
+          </div>
+        </div>
       </div>
-      <div className="modal__footer">
+      <div className="modal__footer needs-input">
         <button type="button" className="btn-secondary" disabled={busy} onClick={onCancel}>
           Cancel
         </button>

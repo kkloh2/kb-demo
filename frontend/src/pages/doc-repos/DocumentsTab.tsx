@@ -229,7 +229,8 @@ export function DocumentsTab({ token, docRepo, onSessionEnded }: Props) {
         )}
       </Modal>
 
-      <Modal open={uploading !== null} title={uploading?.target ? "Upload new version" : "Upload documents"}
+      <Modal open={uploading !== null} wide={!uploading?.target}
+        title={uploading?.target ? "Upload new version" : "Upload documents"}
         onClose={() => setUploading(null)}>
         {uploading && (
           <UploadDialog

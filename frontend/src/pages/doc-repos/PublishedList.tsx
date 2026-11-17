@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { type DocRepoDocument } from "../../api/documents";
 import { ChevronIcon, DownloadIcon, FileIcon, FolderIcon, MoreIcon, SearchIcon, UploadIcon } from "../../components/Icons";
 import { Menu, type MenuItem } from "../../components/Menu";
 import { Pager, usePagination } from "../../components/Pager";
 import { SortHeader, useSort } from "../../components/Sort";
 import { timeAgo } from "../../lib/time";
-import { DocName, folderLabel, matchesQuery, plural, within } from "./docs-common";
+import { DocName, folderLabel, matchesQuery, plural } from "./docs-common";
 
 interface Props {
   docs: DocRepoDocument[] | null; // each document's latest approved version
@@ -21,48 +21,26 @@ interface Props {
 const MAX_FACETS = 4; // metadata fields offered as filters (the first ones the repository defines)
 
 /**
- * Published documents, the library: browse by folder; a search or a filter lists the matches with
- * where each one is kept (Location), filtered by folder and by metadata, each choice with its count.
+ * Published documents, the library: browse by folder; a search or a filter lists the matches from
+ * every folder with where each one is kept (Location), filtered by metadata, each choice with its count.
  */
 export function PublishedList({ docs, inProgress, canUpload, folder, onFolder, onOpen, onDownload, onNewVersion }: Props) {
   const [query, setQuery] = useState("");
-  const [scope, setScope] = useState(""); // the Folder filter while searching ("" = all folders)
   const [meta, setMeta] = useState<Record<string, string>>({}); // label -> value
   const filtering = query.trim() !== "" || Object.keys(meta).length > 0;
   const all = useMemo(() => docs ?? [], [docs]);
-
-  // A search starts in the folder being browsed; the Folder filter can widen it.
-  const [wasFiltering, setWasFiltering] = useState(false);
-  useEffect(() => {
-    if (filtering && !wasFiltering) setScope(folder);
-    setWasFiltering(filtering);
-  }, [filtering, wasFiltering, folder]);
 
   // ---------------------------------------------------------------- filter mode
   const byQuery = useMemo(() => all.filter((d) => matchesQuery(d, query)), [all, query]);
   const metaMatch = (d: DocRepoDocument, except?: string) =>
     Object.entries(meta).every(([label, value]) => label === except || d.metadata.some((m) => m.label === label && m.value === value));
   const matches = useMemo(
-    () => byQuery.filter((d) => within(d.folder, scope) && metaMatch(d)),
+    () => byQuery.filter((d) => metaMatch(d)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [byQuery, scope, meta],
+    [byQuery, meta],
   );
 
   // Facet counts: each counts the matches of every other filter, as library catalogues do.
-  const folderFacet = useMemo(() => {
-    const pool = byQuery.filter((d) => metaMatch(d));
-    const counts = new Map<string, number>();
-    for (const d of pool) {
-      const parts = d.folder ? d.folder.split("/") : [];
-      for (let i = 1; i <= parts.length; i++) {
-        const p = parts.slice(0, i).join("/");
-        counts.set(p, (counts.get(p) ?? 0) + 1);
-      }
-    }
-    return { total: pool.length, folders: [...counts.entries()].sort(([a], [b]) => a.localeCompare(b)) };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [byQuery, meta]);
-
   const labels = useMemo(() => {
     const seen: string[] = [];
     for (const d of all) for (const m of d.metadata) if (m.value && !seen.includes(m.label)) seen.push(m.label);
@@ -74,14 +52,14 @@ export function PublishedList({ docs, inProgress, canUpload, folder, onFolder, o
       labels.map((label) => {
         const counts = new Map<string, number>();
         for (const d of byQuery) {
-          if (!within(d.folder, scope) || !metaMatch(d, label)) continue;
+          if (!metaMatch(d, label)) continue;
           const v = d.metadata.find((m) => m.label === label)?.value;
           if (v) counts.set(v, (counts.get(v) ?? 0) + 1);
         }
         return { label, values: [...counts.entries()].sort(([a], [b]) => a.localeCompare(b)) };
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [labels, byQuery, scope, meta],
+    [labels, byQuery, meta],
   );
 
   // ---------------------------------------------------------------- browse mode
@@ -137,20 +115,6 @@ export function PublishedList({ docs, inProgress, canUpload, folder, onFolder, o
             <input type="search" placeholder="Search published documents" value={query}
               onChange={(e) => setQuery(e.target.value)} aria-label="Search published documents" />
           </label>
-          {filtering && (
-            <label className="filter">
-              <span className="sr-only">Folder</span>
-              <select value={scope} onChange={(e) => setScope(e.target.value)}>
-                <option value="">All folders ({folderFacet.total})</option>
-                {folderFacet.folders.map(([f, n]) => (
-                  <option key={f} value={f}>
-                    {folderLabel(f)} ({n})
-                  </option>
-                ))}
-              </select>
-              <ChevronIcon dir="down" />
-            </label>
-          )}
           {metaFacets.map((f) => (
             <label key={f.label} className="filter">
               <span className="sr-only">{f.label}</span>
@@ -174,9 +138,8 @@ export function PublishedList({ docs, inProgress, canUpload, folder, onFolder, o
 
       {filtering ? (
         <p className="filter-summary" aria-live="polite">
-          {plural(matches.length, "published document", "published documents")} in{" "}
-          {scope ? folderLabel(scope) : "all folders"}
-          {filters.length ? `, ${filters.join(", ")}` : ""}.
+          {plural(matches.length, "published document", "published documents")}
+          {filters.length ? ` ${filters.join(", ")}` : ""}.
           <button type="button" className="btn-link" onClick={clear}>
             Clear filters
           </button>

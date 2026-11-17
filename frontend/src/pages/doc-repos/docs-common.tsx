@@ -34,9 +34,6 @@ export function allFolders(docs: DocRepoDocument[]): string[] {
   return [...out].sort((a, b) => a.localeCompare(b));
 }
 
-/** Is `folder` the scope or below it? ("" is everything.) */
-export const within = (folder: string, scope: string) => !scope || folder === scope || folder.startsWith(`${scope}/`);
-
 /** Matches a search: name, folder or any metadata value. */
 export function matchesQuery(d: DocRepoDocument, q: string): boolean {
   q = q.trim().toLowerCase();

@@ -1,17 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { STATUS_LABEL, type DocRepoDocument, type DocumentStatus } from "../../api/documents";
-import { ChevronIcon, DownloadIcon, FileIcon, MoreIcon, SearchIcon, TrashIcon, UploadIcon } from "../../components/Icons";
+import { DownloadIcon, FileIcon, MoreIcon, SearchIcon, TrashIcon, UploadIcon } from "../../components/Icons";
 import { Menu, type MenuItem } from "../../components/Menu";
 import { Pager, usePagination } from "../../components/Pager";
 import { SelectAll } from "../../components/SelectAll";
 import { SortHeader, useSort } from "../../components/Sort";
 import { timeAgo } from "../../lib/time";
-import { DocName, folderLabel, matchesQuery, plural, within } from "./docs-common";
+import { DocName, folderLabel, matchesQuery, plural } from "./docs-common";
 
 /** Documents a maker can tick for bulk submission: drafts and those sent back for changes. */
 const BULK_STATUSES: DocumentStatus[] = ["draft", "changes_requested"];
 const bulkable = (d: DocRepoDocument) => d.actions.submit && BULK_STATUSES.includes(d.status);
-const STATUSES: DocumentStatus[] = ["draft", "pending_approval", "changes_requested", "rejected"];
 
 interface Props {
   docs: DocRepoDocument[] | null; // latest versions not yet approved
@@ -26,36 +25,15 @@ interface Props {
 
 /**
  * Work in progress: the latest version of every document that isn't approved yet, as a task list
- * (status, who, when, where it's kept). Makers tick drafts and changes-requested documents to
+ * (status, who, when, where it's kept), filtered by search. Makers tick drafts and changes-requested documents to
  * submit them together.
  */
 export function InProgressList({ docs, canUpload, selected, onSelected, onOpen, onDownload, onSubmit, onDelete }: Props) {
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<"" | DocumentStatus>("");
-  const [scope, setScope] = useState("");
   const all = useMemo(() => docs ?? [], [docs]);
 
   const byQuery = useMemo(() => all.filter((d) => matchesQuery(d, query)), [all, query]);
-  const matches = useMemo(
-    () => byQuery.filter((d) => (!status || d.status === status) && within(d.folder, scope)),
-    [byQuery, status, scope],
-  );
-  const statusCounts = useMemo(() => {
-    const pool = byQuery.filter((d) => within(d.folder, scope));
-    return { total: pool.length, by: Object.fromEntries(STATUSES.map((s) => [s, pool.filter((d) => d.status === s).length])) };
-  }, [byQuery, scope]);
-  const folderCounts = useMemo(() => {
-    const pool = byQuery.filter((d) => !status || d.status === status);
-    const counts = new Map<string, number>();
-    for (const d of pool) {
-      const parts = d.folder ? d.folder.split("/") : [];
-      for (let i = 1; i <= parts.length; i++) {
-        const p = parts.slice(0, i).join("/");
-        counts.set(p, (counts.get(p) ?? 0) + 1);
-      }
-    }
-    return { total: pool.length, folders: [...counts.entries()].sort(([a], [b]) => a.localeCompare(b)) };
-  }, [byQuery, status]);
+  const matches = byQuery;
 
   const { sorted, sort, toggle: sortBy } = useSort(matches, {
     name: { value: (d) => d.filename },
@@ -67,7 +45,7 @@ export function InProgressList({ docs, canUpload, selected, onSelected, onOpen, 
   const { rows, ...pager } = usePagination(sorted);
 
   // A different search or filter starts a new selection; "select all" covers what it shows.
-  useEffect(() => onSelected(new Map()), [query, status, scope]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => onSelected(new Map()), [query]); // eslint-disable-line react-hooks/exhaustive-deps
   const tickable = useMemo(() => matches.filter(bulkable), [matches]);
   const tickedHere = tickable.filter((d) => selected.has(d.id)).length;
 
@@ -85,7 +63,7 @@ export function InProgressList({ docs, canUpload, selected, onSelected, onOpen, 
     ...(d.actions.delete ? [{ label: "Delete…", icon: <TrashIcon />, danger: true, onSelect: () => onDelete(d) }] : []),
   ];
 
-  const filtered = query.trim() !== "" || status !== "" || scope !== "";
+  const filtered = query.trim() !== "";
 
   return (
     <>
@@ -96,40 +74,14 @@ export function InProgressList({ docs, canUpload, selected, onSelected, onOpen, 
             <input type="search" placeholder="Search documents in progress" value={query}
               onChange={(e) => setQuery(e.target.value)} aria-label="Search documents in progress" />
           </label>
-          <label className="filter">
-            <span className="sr-only">Status</span>
-            <select value={status} onChange={(e) => setStatus(e.target.value as "" | DocumentStatus)}>
-              <option value="">All statuses ({statusCounts.total})</option>
-              {STATUSES.filter((s) => statusCounts.by[s] > 0 || s === status).map((s) => (
-                <option key={s} value={s}>
-                  {STATUS_LABEL[s]} ({statusCounts.by[s]})
-                </option>
-              ))}
-            </select>
-            <ChevronIcon dir="down" />
-          </label>
-          <label className="filter">
-            <span className="sr-only">Folder</span>
-            <select value={scope} onChange={(e) => setScope(e.target.value)}>
-              <option value="">All folders ({folderCounts.total})</option>
-              {folderCounts.folders.map(([f, n]) => (
-                <option key={f} value={f}>
-                  {folderLabel(f)} ({n})
-                </option>
-              ))}
-            </select>
-            <ChevronIcon dir="down" />
-          </label>
         </div>
       </div>
 
       {filtered && (
         <p className="filter-summary" aria-live="polite">
           {plural(matches.length, "document", "documents")} in progress
-          {status ? `, ${STATUS_LABEL[status].toLowerCase()}` : ""}
-          {scope ? ` in ${folderLabel(scope)}` : ""}
           {query.trim() ? `, matching “${query.trim()}”` : ""}.
-          <button type="button" className="btn-link" onClick={() => { setQuery(""); setStatus(""); setScope(""); }}>
+          <button type="button" className="btn-link" onClick={() => setQuery("")}>
             Clear filters
           </button>
         </p>
@@ -189,12 +141,7 @@ export function InProgressList({ docs, canUpload, selected, onSelected, onOpen, 
                     <td>
                       <DocName d={d} onOpen={() => onOpen(d)} />
                     </td>
-                    <td className="truncate" title={folderLabel(d.folder)}>
-                      <button type="button" className="link-button" onClick={() => setScope(d.folder)}
-                        title={`Only show ${folderLabel(d.folder)}`}>
-                        {folderLabel(d.folder)}
-                      </button>
-                    </td>
+                    <td className="truncate" title={folderLabel(d.folder)}>{folderLabel(d.folder)}</td>
                     <td>
                       <span className={`status status--${d.status}`} title={d.last_decision?.comment ?? undefined}>
                         {STATUS_LABEL[d.status]}

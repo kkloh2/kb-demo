@@ -428,8 +428,9 @@
   color: var(--text-primary);
 }
 
-/* Bulk actions are greyed out until something is selected: the same outline shape, in grey. */
-.bulk-actions :is(.btn-primary, .btn-secondary, .btn-outline, .btn-danger):disabled {
+/* Bulk actions (and other buttons waiting for input, .needs-input) are greyed out until something is
+   selected: the same outline shape, in grey. */
+:is(.bulk-actions, .needs-input) :is(.btn-primary, .btn-secondary, .btn-outline, .btn-danger):disabled {
   border-color: var(--border-strong);
   background: var(--bg-surface);
   color: var(--text-muted);
@@ -437,7 +438,7 @@
   cursor: not-allowed;
 }
 
-.bulk-actions :is(.btn-primary, .btn-secondary, .btn-outline, .btn-danger):disabled:hover {
+:is(.bulk-actions, .needs-input) :is(.btn-primary, .btn-secondary, .btn-outline, .btn-danger):disabled:hover {
   background: var(--bg-surface);
 }
 
@@ -626,18 +627,390 @@
   color: var(--text-secondary);
 }
 
-.upload-dialog .form-grid {
-  margin-bottom: var(--sp-5);
-}
-
-.upload-dialog__pick {
+.upload-dialog {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
+  flex-direction: column;
+  gap: var(--sp-5);
 }
 
-.upload-dialog__summary {
-  margin: var(--sp-4) 0 0;
+.upload-dialog .modal__text {
+  margin: 0;
+}
+
+/* Where the files go, one line above them (chosen in the folder tree). */
+.dest-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.dest-line > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: #b26a00;
+}
+
+.dest-line strong {
+  color: var(--text-primary);
+}
+
+.dest-line .badge {
+  margin: 0;
+}
+
+/* The chosen files, in place of the drop area. */
+.picked {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-weight: 400;
+}
+
+.picked__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: 44px;
+  padding: 0 var(--sp-1) 0 var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--gray-050);
+  color: var(--text-primary);
+}
+
+.picked__list {
+  max-height: 220px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.picked__list li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 44px;
+  padding: var(--sp-1) var(--sp-3);
+}
+
+.picked__list li + li {
+  border-top: 1px solid var(--border);
+}
+
+.upload-dialog__drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-6) var(--sp-4);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--gray-050);
   font-size: var(--fs-sm);
   color: var(--text-secondary);
+  text-align: center;
+}
+
+.upload-dialog__drop--over {
+  border-color: var(--brand-red);
+  background: var(--brand-red-050);
+}
+
+.upload-dialog__drop > svg {
+  width: 24px;
+  height: 24px;
+  color: var(--text-muted);
+}
+
+.upload-dialog__drop p {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.upload-dialog__drop small {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.link-inline {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--brand-red-600);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.link-inline:focus-visible {
+  outline: none;
+  border-radius: 2px;
+  box-shadow: var(--focus-ring);
+}
+
+/* ---------- Upload window: folder tree on the left, files on the right ---------- */
+.upload-dialog--split {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: var(--sp-5);
+  align-items: start;
+}
+
+.upload-dialog__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  min-width: 0;
+}
+
+.upload-dialog__tree {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.upload-dialog__label {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.folder-tree {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  font-size: var(--fs-sm);
+}
+
+.folder-tree__search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.folder-tree__search svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+}
+
+.folder-tree__search input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: var(--text-primary);
+  outline: none;
+}
+
+.folder-tree__body {
+  height: 280px;
+  padding: var(--sp-1) 0;
+  overflow-y: auto;
+}
+
+.folder-tree__list,
+.folder-tree__list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.folder-tree__row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 34px;
+  padding-right: var(--sp-2);
+}
+
+.folder-tree__row:hover {
+  background: var(--gray-100);
+}
+
+.folder-tree__row--chosen,
+.folder-tree__row--chosen:hover {
+  background: var(--brand-red-050);
+}
+
+.folder-tree__row--chosen .folder-tree__name {
+  font-weight: 700;
+  color: var(--brand-red-600);
+}
+
+.folder-tree__toggle {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.folder-tree__toggle svg {
+  width: 14px;
+  height: 14px;
+}
+
+.folder-tree__name,
+.folder-tree__found {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 var(--sp-1);
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.folder-tree__found {
+  width: 100%;
+  padding: var(--sp-1) var(--sp-3);
+}
+
+.folder-tree__found:hover {
+  background: var(--gray-100);
+}
+
+.folder-tree__name svg,
+.folder-tree__found svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: #b26a00;
+}
+
+.folder-tree__found-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.folder-tree__found-text small {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.folder-tree__toggle:focus-visible,
+.folder-tree__name:focus-visible,
+.folder-tree__found:focus-visible {
+  outline: none;
+  box-shadow: inset var(--focus-ring);
+}
+
+.folder-tree__empty {
+  margin: 0;
+  padding: var(--sp-3);
+  color: var(--text-muted);
+}
+
+.folder-tree__foot {
+  padding: var(--sp-2);
+  border-top: 1px solid var(--border);
+}
+
+.folder-tree__new {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.folder-tree__new svg {
+  width: 14px;
+  height: 14px;
+}
+
+.folder-tree__naming {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.folder-tree__naming input {
+  height: 32px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font: inherit;
+  color: var(--text-primary);
+}
+
+.folder-tree__naming input:focus {
+  outline: none;
+  border-color: var(--brand-red);
+  box-shadow: var(--focus-ring);
+}
+
+.folder-tree__naming-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.folder-tree__naming-actions small {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.folder-tree__create {
+  color: var(--brand-red-600);
+}
+
+.folder-tree__create:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+/* The files side fills the height of the folder tree beside it. */
+.upload-dialog--split {
+  align-items: stretch;
+}
+
+.upload-dialog--split .upload-dialog__main > .form-field:last-child {
+  flex: 1;
+}
+
+.upload-dialog--split .upload-dialog__drop {
+  flex: 1;
+  justify-content: center;
+}
+
+.upload-dialog--split .picked {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.upload-dialog--split .picked__list {
+  flex: 1;
+  max-height: 260px;
 }

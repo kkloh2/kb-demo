@@ -27,6 +27,9 @@ export function Modal({ open, title, onClose, children, wide = false }: Props) {
       className={wide ? "modal modal--wide" : "modal"}
       aria-labelledby="modal-title"
       onCancel={(e) => {
+        // Escape on the dialog. A file chooser closed without choosing also fires "cancel" on its
+        // <input type="file">, which bubbles here: that must not close the dialog.
+        if (e.target !== e.currentTarget) return;
         e.preventDefault();
         onClose();
       }}
