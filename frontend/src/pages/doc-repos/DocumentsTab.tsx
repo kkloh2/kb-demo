@@ -30,11 +30,16 @@ import { Pager, usePagination } from "../../components/Pager";
 import { timeAgo } from "../../lib/time";
 import { DocumentPanel } from "./DocumentPanel";
 import { MessageBar } from "../../components/MessageBar";
+import { SelectAll } from "../../components/SelectAll";
 
 // Must match the server's allowed_upload_extensions; anything else in a folder is left out.
 const ALLOWED = [".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".csv", ".txt", ".md"];
 
 type StatusFilter = "all" | DocumentStatus;
+
+/** Documents a maker can tick for bulk submission: drafts and those sent back for changes. */
+const BULK_STATUSES: DocumentStatus[] = ["draft", "changes_requested"];
+const bulkable = (d: DocRepoDocument) => d.actions.submit && BULK_STATUSES.includes(d.status);
 type Notice = { kind: "ok" | "error"; text: string } | null;
 
 interface Props {
@@ -44,8 +49,9 @@ interface Props {
   onCountChange?: (count: number) => void;
 }
 
-/** The repository's documents, browsable by folder, with upload, and submit / delete per document.
- * Decisions happen on the Approvals page. */
+/** The repository's documents, browsable by folder, with upload, submit / delete per document, and
+ * bulk submission of ticked drafts and changes-requested documents (all or none). Decisions happen on
+ * the Approvals page. */
 export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: Props) {
   const { access } = docRepo;
   const [docs, setDocs] = useState<DocRepoDocument[] | null>(null);
@@ -56,6 +62,9 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
   const [deleting, setDeleting] = useState<string[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
+  // Ticked documents, with the status each had when ticked: the server refuses the batch if any changed.
+  const [selected, setSelected] = useState<Map<string, DocumentStatus>>(new Map());
+  const [confirming, setConfirming] = useState(false);
   const filesInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
 
@@ -72,6 +81,15 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
       .then((r) => {
         setDocs(r);
         onCountChange?.(r.length);
+        // keep only ticks that still apply to what's there now
+        const now = new Map(r.map((d) => [d.id, d]));
+        setSelected((sel) => {
+          const kept = new Map([...sel].filter(([id, st]) => {
+            const d = now.get(id);
+            return d !== undefined && d.status === st && bulkable(d);
+          }));
+          return kept.size === sel.size ? sel : kept;
+        });
       })
       .catch(fail);
   }, [token, docRepo.id, fail, onCountChange]);
@@ -114,6 +132,45 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
   }, [docs, folder, matches, searching]);
 
   const { rows, ...pager } = usePagination(files);
+
+  // A different folder, search or filter starts a new selection; "select all" covers what it shows.
+  useEffect(() => setSelected(new Map()), [folder, query, status]);
+  const showChecks = access.upload;
+  const tickable = useMemo(() => files.filter(bulkable), [files]);
+  const tickedHere = tickable.filter((d) => selected.has(d.id)).length;
+  const chosen = useMemo(() => (docs ?? []).filter((d) => selected.has(d.id)), [docs, selected]);
+
+  function toggle(d: DocRepoDocument) {
+    setSelected((sel) => {
+      const next = new Map(sel);
+      if (next.has(d.id)) next.delete(d.id);
+      else next.set(d.id, d.status);
+      return next;
+    });
+  }
+
+  function toggleAll(all: boolean) {
+    setSelected(all ? new Map(tickable.map((d) => [d.id, d.status])) : new Map());
+  }
+
+  async function submitSelected() {
+    const statuses = Object.fromEntries(selected);
+    const n = selected.size;
+    setConfirming(false);
+    setBusy("bulk-submit");
+    setNotice(null);
+    try {
+      await submitDocuments(token, docRepo.id, statuses);
+      setNotice({ kind: "ok", text: `Submitted ${n} document${n === 1 ? "" : "s"} for approval.` });
+      setSelected(new Map());
+    } catch (e) {
+      fail(e);
+      if (e instanceof ApiError && e.status === 409) setSelected(new Map());
+    } finally {
+      setBusy(null);
+      load();
+    }
+  }
 
   // ---------------------------------------------------------------- actions
   function report(verb: string, r: BulkResult) {
@@ -177,7 +234,7 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
     { label: "Open", icon: <FileIcon />, onSelect: () => setOpenId(d.id) },
     { label: "Download", icon: <DownloadIcon />, onSelect: () => downloadDocument(token, d).catch(fail) },
     ...(d.actions.submit
-      ? [{ label: "Submit for approval", icon: <UploadIcon />, onSelect: () => run("submit", () => submitDocuments(token, docRepo.id, [d.id]), "Submitted") }]
+      ? [{ label: "Submit for approval", icon: <UploadIcon />, onSelect: () => run("submit", () => submitDocuments(token, docRepo.id, { [d.id]: d.status }), "Submitted") }]
       : []),
     ...(d.actions.delete ? [{ label: "Delete…", icon: <TrashIcon />, danger: true, onSelect: () => setDeleting([d.id]) }] : []),
   ];
@@ -215,7 +272,21 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
         </div>
 
         {access.upload && (
-          <>
+          <div className="toolbar__right bulk-actions">
+            {selected.size > 0 && (
+              <span className="selection-count" aria-live="polite">
+                <strong>{selected.size} selected</strong>
+                <button type="button" className="btn-link" onClick={() => setSelected(new Map())}>
+                  Clear
+                </button>
+              </span>
+            )}
+            <button type="button" className="btn-primary" disabled={selected.size === 0 || busy !== null}
+              title={selected.size === 0 ? "Tick drafts or documents sent back for changes to submit them together" : undefined}
+              onClick={() => setConfirming(true)}>
+              <UploadIcon />
+              {busy === "bulk-submit" ? "Submitting…" : "Submit for approval"}
+            </button>
             <Menu
               trigger={(props) => (
                 <button type="button" className="btn-outline" disabled={busy !== null} {...props}>
@@ -233,7 +304,7 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
               onChange={(e) => onPicked(e.target.files, false)} data-testid="upload-files" />
             <input ref={folderInput} type="file" multiple hidden
               onChange={(e) => onPicked(e.target.files, true)} data-testid="upload-folder" />
-          </>
+          </div>
         )}
       </div>
 
@@ -281,6 +352,7 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
           <>
             <table className="data-table docs-table">
               <colgroup>
+                {showChecks && <col style={{ width: "44px" }} />}
                 <col />
                 <col style={{ width: "150px" }} />
                 <col style={{ width: "18%" }} />
@@ -289,6 +361,12 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
               </colgroup>
               <thead>
                 <tr>
+                  {showChecks && (
+                    <th scope="col" className="check-cell">
+                      <SelectAll selected={tickedHere} total={tickable.length} onChange={toggleAll}
+                        label="Select all drafts and documents sent back for changes" />
+                    </th>
+                  )}
                   <th scope="col">Name</th>
                   <th scope="col">Status</th>
                   <th scope="col">Uploaded by</th>
@@ -301,6 +379,7 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
               <tbody>
                 {subfolders.map((f) => (
                   <tr key={`folder:${f.name}`} className="docs-table__folder">
+                    {showChecks && <td className="check-cell" />}
                     <td>
                       <button type="button" className="doc-name doc-name--button"
                         onClick={() => setFolder(folder ? `${folder}/${f.name}` : f.name)}>
@@ -317,6 +396,14 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
                 ))}
                 {rows.map((d) => (
                   <tr key={d.id}>
+                    {showChecks && (
+                      <td className="check-cell">
+                        {bulkable(d) && (
+                          <input type="checkbox" className="row-check" aria-label={`Select ${d.filename}`}
+                            checked={selected.has(d.id)} onChange={() => toggle(d)} />
+                        )}
+                      </td>
+                    )}
                     <td>
                       <button type="button" className="doc-name doc-name--button" onClick={() => setOpenId(d.id)}
                         title={`${d.folder ? `${d.folder}/` : ""}${d.filename}`}>
@@ -372,6 +459,38 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
             }}
             onSessionEnded={onSessionEnded}
           />
+        )}
+      </Modal>
+
+      <Modal open={confirming} title="Submit for approval" onClose={() => setConfirming(false)}>
+        {confirming && (
+          <>
+            <div className="modal__body bulk-confirm">
+              <p className="modal__text">
+                Submit {chosen.length === 1 ? "this document" : `these ${chosen.length} documents`} for approval? They're
+                locked until a checker decides. If any changed after you selected it, none is submitted.
+              </p>
+              <ul className="selection-list">
+                {chosen.map((d) => (
+                  <li key={d.id}>
+                    <span className={`doc-name__icon doc-name__icon--${extKind(d.filename)}`}>
+                      <FileIcon />
+                    </span>
+                    <span className="selection-list__name" title={d.filename}>{d.filename}</span>
+                    {d.folder && <span className="selection-list__meta" title={d.folder}>{d.folder}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="modal__footer">
+              <button type="button" className="btn-secondary" onClick={() => setConfirming(false)}>
+                Cancel
+              </button>
+              <button type="button" className="btn-primary" onClick={submitSelected}>
+                Submit {chosen.length}
+              </button>
+            </div>
+          </>
         )}
       </Modal>
 

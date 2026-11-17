@@ -132,7 +132,7 @@
   align-items: center;
   gap: var(--sp-2);
   height: 40px;
-  padding: 0 var(--sp-4);
+  padding: 0 var(--sp-5);
   border: 1px solid var(--brand-red);
   border-radius: var(--radius);
   background: var(--bg-surface);
@@ -155,11 +155,6 @@
 .btn-outline:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-}
-
-.btn-outline svg {
-  width: 16px;
-  height: 16px;
 }
 
 .notice--error {

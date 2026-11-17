@@ -5,6 +5,8 @@
     GET  /api/approvals/{task_id}          signed in   one of them in full, with its summary (404 when it
                                                        isn't waiting for me)
     POST /api/approvals/{task_id}/decision signed in   {decision: approve | reject | request_changes, comment}
+    POST /api/approvals/decisions          signed in   {task_ids, decision, comment}: the same decision and
+                                                       comment for each, all or none (409: nothing decided)
 
 Anyone signed in may call these; each only ever shows tasks the caller may decide (assigned to a
 group where they hold the required role, not their own requests). The UI shows the page to people
@@ -19,7 +21,7 @@ from app.access import service as access
 from app.access.models import AppUser
 from app.approvals import service
 from app.approvals.models import Decision
-from app.approvals.schemas import ApprovalListOut, ApprovalOut, DecisionIn, DecisionOut, PersonRef, RequestHistoryOut, RoundOut
+from app.approvals.schemas import ApprovalListOut, BulkDecisionIn, BulkDecisionOut, ApprovalOut, DecisionIn, DecisionOut, PersonRef, RequestHistoryOut, RoundOut
 from app.auth.dependencies import CurrentUser
 from app.core.errors import InvalidRequest
 from app.db.session import Db
@@ -60,13 +62,25 @@ def get_approval(task_id: uuid.UUID, db: Db, p: CurrentUser) -> ApprovalOut:
     return _out(service.inbox_item(db, access.require_user(db, p.lan_id), task_id))
 
 
+def _decision(text: str) -> Decision:
+    decision = _DECISIONS.get(text.strip().lower())
+    if decision is None:
+        raise InvalidRequest("decision is approve, reject or request_changes.")
+    return decision
+
+
+@router.post("/decisions", response_model=BulkDecisionOut,
+             responses={409: {"description": "One is no longer waiting for you: nothing decided"}})
+def decide_many(body: BulkDecisionIn, db: Db, p: CurrentUser) -> BulkDecisionOut:
+    """Decide several tasks at once, possibly from different repositories. All or none."""
+    done = service.decide_many(db, access.require_user(db, p.lan_id), body.task_ids, _decision(body.decision), body.comment)
+    return BulkDecisionOut(decided=len(done))
+
+
 @router.post("/{task_id}/decision", status_code=204,
              responses={404: {"description": "Not waiting for you"}, 409: {"description": "Already decided"}})
 def decide(task_id: uuid.UUID, body: DecisionIn, db: Db, p: CurrentUser) -> None:
-    decision = _DECISIONS.get(body.decision.strip().lower())
-    if decision is None:
-        raise InvalidRequest("decision is approve, reject or request_changes.")
-    service.decide(db, access.require_user(db, p.lan_id), task_id, decision, body.comment)
+    service.decide(db, access.require_user(db, p.lan_id), task_id, _decision(body.decision), body.comment)
 
 
 def history_out(items: list[service.RequestHistory]) -> list[RequestHistoryOut]:

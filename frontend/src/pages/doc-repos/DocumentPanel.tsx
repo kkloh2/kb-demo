@@ -120,7 +120,7 @@ export function DocumentPanel({ token, docRepoId, documentId, onClose, onChanged
   const saveAndSubmit = () =>
     act("submit", async () => {
       await updateMetadata(token, docRepoId, doc.id, payload());
-      const r = await submitDocuments(token, docRepoId, [doc.id]);
+      const r = await submitDocuments(token, docRepoId, { [doc.id]: doc.status });
       if (r.skipped.length) {
         show(await getDocument(token, docRepoId, doc.id));
         throw new Error(r.skipped[0].reason);

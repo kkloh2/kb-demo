@@ -100,8 +100,13 @@ export function uploadDocuments(t: string, repoId: string, files: { file: File; 
 
 export const updateMetadata = (t: string, repoId: string, id: string, body: MetadataUpdate) =>
   api<DocRepoDocument>(t, `${base(repoId)}/documents/${id}/metadata`, { method: "PUT", body: json(body) });
-export const submitDocuments = (t: string, repoId: string, ids: string[]) =>
-  api<BulkResult>(t, `${base(repoId)}/documents/submit`, { method: "POST", body: json({ ids }) });
+/** Submit for approval, all or none. `statuses`: what each document's status was when chosen; if any
+ * has changed since, nothing is submitted (409). */
+export const submitDocuments = (t: string, repoId: string, statuses: Record<string, DocumentStatus>) =>
+  api<BulkResult>(t, `${base(repoId)}/documents/submit`, {
+    method: "POST",
+    body: json({ ids: Object.keys(statuses), statuses }),
+  });
 export const deleteDocuments = (t: string, repoId: string, ids: string[]) =>
   api<BulkResult>(t, `${base(repoId)}/documents/delete`, { method: "POST", body: json({ ids }) });
 

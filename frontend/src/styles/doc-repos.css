@@ -28,12 +28,6 @@
   overflow-wrap: anywhere;
 }
 
-.btn-secondary svg {
-  width: 16px;
-  height: 16px;
-  margin-right: var(--sp-2);
-}
-
 /* Doc-repo form: the "Department metadata" heading inside the grid. */
 .form-section {
   display: flex;
@@ -389,4 +383,114 @@
 /* Keeps a row's icons lined up with rows that have one more (e.g. no delete for the default group). */
 .kb-icon-btn--spacer {
   visibility: hidden;
+}
+
+/* ---------- Bulk selection (Documents tab, Approvals) ---------- */
+.row-check {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  vertical-align: middle;
+  accent-color: var(--brand-red);
+  cursor: pointer;
+}
+
+.row-check:disabled {
+  cursor: default;
+}
+
+.data-table th.check-cell,
+.data-table td.check-cell {
+  padding-right: 0;
+}
+
+.data-table th.check-cell::after {
+  display: none;
+}
+
+.toolbar__right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.selection-count {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-right: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.selection-count strong {
+  color: var(--text-primary);
+}
+
+/* Bulk actions are greyed out until something is selected: the same outline shape, in grey. */
+.bulk-actions :is(.btn-primary, .btn-secondary, .btn-outline, .btn-danger):disabled {
+  border-color: var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  opacity: 1;
+  cursor: not-allowed;
+}
+
+.bulk-actions :is(.btn-primary, .btn-secondary, .btn-outline, .btn-danger):disabled:hover {
+  background: var(--bg-surface);
+}
+
+/* The confirm window for a bulk action: a short note, the chosen items, then the comment. */
+.bulk-confirm .modal__text {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.selection-list {
+  max-height: 232px;
+  margin: var(--sp-4) 0 var(--sp-5);
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  list-style: none;
+  font-size: var(--fs-sm);
+}
+
+.selection-list:last-child {
+  margin-bottom: 0;
+}
+
+.selection-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 44px;
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.selection-list li + li {
+  border-top: 1px solid var(--border);
+}
+
+.selection-list__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selection-list__meta {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

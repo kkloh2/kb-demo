@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { decide, downloadFor, getApproval, type Approval, type ApprovalListItem, type DecisionKind } from "../../api/approvals";
 import { ApiError } from "../../api/http";
-import { CheckIcon, DownloadIcon } from "../../components/Icons";
+import { ApproveIcon, DownloadIcon, RejectIcon, RequestChangesIcon } from "../../components/Icons";
+
+const DECISION_ICON = { approve: <ApproveIcon />, reject: <RejectIcon />, request_changes: <RequestChangesIcon /> };
 import { MessageBar } from "../../components/MessageBar";
 
 interface Props {
@@ -171,15 +173,17 @@ export function ApprovalPanel({ token, approval: listed, onClose, onDecided, onG
             <button type="button" className="btn-secondary" onClick={onClose}>
               Close
             </button>
-            <button type="button" className="btn-outline" disabled={busy !== null} onClick={() => setWriting("reject")}>
-              Reject…
+            <button type="button" className="btn-secondary" disabled={busy !== null} onClick={() => setWriting("reject")}>
+              {DECISION_ICON.reject}
+              Reject
             </button>
-            <button type="button" className="btn-outline" disabled={busy !== null}
+            <button type="button" className="btn-secondary" disabled={busy !== null}
               onClick={() => setWriting("request_changes")}>
-              Request changes…
+              {DECISION_ICON.request_changes}
+              Request changes
             </button>
             <button type="button" className="btn-primary" disabled={busy !== null} onClick={() => submit("approve")}>
-              <CheckIcon />
+              {DECISION_ICON.approve}
               {busy === "approve" ? "Approving…" : "Approve"}
             </button>
           </>
@@ -190,6 +194,7 @@ export function ApprovalPanel({ token, approval: listed, onClose, onDecided, onG
             </button>
             <button type="button" className={writing === "reject" ? "btn-danger" : "btn-primary"}
               disabled={busy !== null || !comment.trim()} onClick={() => submit(writing)}>
+              {DECISION_ICON[writing]}
               {busy === writing ? WRITING[writing].busy : WRITING[writing].button}
             </button>
           </>

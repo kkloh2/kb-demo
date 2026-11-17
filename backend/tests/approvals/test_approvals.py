@@ -150,10 +150,10 @@ def test_removing_the_checker_role_empties_the_inbox_at_once(client, hub):
     assert decide(client, hub, "cara", task, "approve").status_code == 404
 
 
-def test_submitting_twice_is_refused_as_skipped(client, hub):
+def test_submitting_twice_is_refused(client, hub):
     [doc_id] = submit(client, hub)
     r = client.post(f"/api/doc-repos/{hub['repo']}/documents/submit", json={"ids": [doc_id]}, headers=hub["marcus"])
-    assert r.json()["skipped"][0]["reason"] == "It's pending approval."
+    assert r.status_code == 409 and "policy.pdf is now pending approval" in r.json()["detail"]
 
 
 def test_deleting_a_document_withdraws_its_request(client, hub):

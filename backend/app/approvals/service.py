@@ -426,48 +426,94 @@ def inbox_item(db: Session, user: AppUser, task_id: uuid.UUID) -> InboxItem:
 
 # --------------------------------------------------------------------------- deciding
 
-def decide(db: Session, user: AppUser, task_id: uuid.UUID, decision: Decision, comment: str | None) -> ApprovalRequest:
-    """Record the decision, move the request on, and let the feature react. Commits."""
+def _clean_comment(decision: Decision, comment: str | None) -> str | None:
     comment = (comment or "").strip() or None
     if decision is not Decision.APPROVED and not comment:
         raise InvalidRequest("Say why: the maker sees this." if decision is Decision.CHANGES_REQUESTED
                              else "Give a reason for rejecting.")
-    item = inbox_item(db, user, task_id)  # re-checks the role now; never the requester's own
+    return comment
+
+
+def _record_decision(db: Session, user: AppUser, item: InboxItem, decision: Decision, comment: str | None) -> None:
+    """Claim the task, record the decision, move the request on and let the feature react. Raises
+    Conflict when the task was decided meanwhile. Doesn't commit or roll back: the caller does."""
     task, request = item.task, item.request
     now = utcnow()
     claimed = db.execute(update(ApprovalTask).where(ApprovalTask.id == task.id, ApprovalTask.status == TaskStatus.PENDING.value)
                          .values(status=TaskStatus.COMPLETED.value, outcome=decision.value, completed_at=now))
     if claimed.rowcount != 1:  # another checker got there first
-        db.rollback()
-        raise Conflict("Someone else has already decided this.")
+        raise Conflict(f"Someone else has already decided {request.title}.")
     db.execute(update(ApprovalTaskAssignment).where(ApprovalTaskAssignment.approval_task_id == task.id)
                .values(status=AssignmentStatus.CLOSED.value))  # out of every inbox
     _close_assignees(db, task.id)
+    db.add(ApprovalDecision(approval_task_id=task.id, decided_by=user.id, decision=decision.value,
+                            comment=comment, decided_at=now))
+    db.refresh(task)
+    _event(db, request, "DECISION_RECORDED", user, {"decision": decision.value, "comment": comment,
+                                                   "round": task.round}, task)
+    _audit(db, "APPROVAL_DECIDED", request, user, decision=decision.value, comment=comment,
+           step=(task.task_metadata or {}).get("step", {}).get("name"))
+    meta = {k: v for k, v in (task.task_metadata or {}).items() if k != "step"}
+    instance = engine.complete(db, task.step_instance_id, decision.value, user,
+                               {"snapshot": task.subject_snapshot, "metadata": meta})
+    waiting_review = db.scalar(select(ApprovalTask.id).where(
+        ApprovalTask.approval_request_id == request.id, ApprovalTask.status == TaskStatus.PENDING.value))
+    if instance.status == InstanceStatus.RUNNING.value and waiting_review is None:
+        # the flow went back to a step that waits for the maker (e.g. maker_upload): changes requested
+        request.status = RequestStatus.CHANGES_REQUESTED.value
+        _event(db, request, "REQUEST_CHANGES_REQUESTED", user, {"round": task.round}, task)
+        item.kind.on_decided(db, request, RequestStatus.CHANGES_REQUESTED.value, user, comment)
+    elif instance.status == InstanceStatus.RUNNING.value:
+        _event(db, request, "STEP_COMPLETED", user, {"outcome": decision.value, "round": task.round}, task)
+
+
+def decide(db: Session, user: AppUser, task_id: uuid.UUID, decision: Decision, comment: str | None) -> ApprovalRequest:
+    """Record the decision, move the request on, and let the feature react. Commits."""
+    comment = _clean_comment(decision, comment)
+    item = inbox_item(db, user, task_id)  # re-checks the role now; never the requester's own
     try:
-        db.add(ApprovalDecision(approval_task_id=task.id, decided_by=user.id, decision=decision.value,
-                                comment=comment, decided_at=now))
-        db.refresh(task)
-        _event(db, request, "DECISION_RECORDED", user, {"decision": decision.value, "comment": comment,
-                                                       "round": task.round}, task)
-        _audit(db, "APPROVAL_DECIDED", request, user, decision=decision.value, comment=comment,
-               step=(task.task_metadata or {}).get("step", {}).get("name"))
-        meta = {k: v for k, v in (task.task_metadata or {}).items() if k != "step"}
-        instance = engine.complete(db, task.step_instance_id, decision.value, user,
-                                   {"snapshot": task.subject_snapshot, "metadata": meta})
-        waiting_review = db.scalar(select(ApprovalTask.id).where(
-            ApprovalTask.approval_request_id == request.id, ApprovalTask.status == TaskStatus.PENDING.value))
-        if instance.status == InstanceStatus.RUNNING.value and waiting_review is None:
-            # the flow went back to a step that waits for the maker (e.g. maker_upload): changes requested
-            request.status = RequestStatus.CHANGES_REQUESTED.value
-            _event(db, request, "REQUEST_CHANGES_REQUESTED", user, {"round": task.round}, task)
-            item.kind.on_decided(db, request, RequestStatus.CHANGES_REQUESTED.value, user, comment)
-        elif instance.status == InstanceStatus.RUNNING.value:
-            _event(db, request, "STEP_COMPLETED", user, {"outcome": decision.value, "round": task.round}, task)
+        _record_decision(db, user, item, decision, comment)
         db.commit()
     except Exception:
         db.rollback()
         raise
-    return request
+    return item.request
+
+
+def decide_many(db: Session, user: AppUser, task_ids: list[uuid.UUID], decision: Decision,
+                comment: str | None) -> list[ApprovalRequest]:
+    """The same decision, and the same comment (recorded on each), for several tasks, possibly of
+    different repositories: all or none. If any is no longer waiting for the person (another checker
+    decided it, it was withdrawn, they lost the role) or changes while deciding, nothing is decided:
+    Conflict, naming each. Commits."""
+    if not task_ids:
+        raise InvalidRequest("Choose at least one item.")
+    task_ids = list(dict.fromkeys(task_ids))
+    comment = _clean_comment(decision, comment)
+    items, gone = [], []
+    for task_id in task_ids:
+        try:
+            items.append(inbox_item(db, user, task_id))
+        except NotFound:
+            gone.append(task_id)
+    if gone:
+        titles = {t.id: (t.task_metadata or {}).get("title") or "An item"
+                  for t in db.scalars(select(ApprovalTask).where(ApprovalTask.id.in_(gone)))}
+        names = [titles.get(i, "An item") for i in gone]
+        shown = "; ".join(f"{n} is no longer waiting for you" for n in names[:10])
+        more = f"; and {len(names) - 10} more" if len(names) > 10 else ""
+        raise Conflict(f"Nothing was decided: {shown}{more}. Refresh and try again.")
+    try:
+        for item in items:
+            _record_decision(db, user, item, decision, comment)
+        db.commit()
+    except Conflict as e:
+        db.rollback()
+        raise Conflict(f"Nothing was decided: {e.message.rstrip('.')}. Refresh and try again.")
+    except Exception:
+        db.rollback()
+        raise
+    return [i.request for i in items]
 
 
 # --------------------------------------------------------------------------- withdrawing

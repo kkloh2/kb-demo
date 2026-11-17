@@ -91,7 +91,8 @@ def test_without_a_default_group_the_maker_is_refused(client, hub):
     makers = client.post(f"{url}/groups", json={"name": "Makers"}, headers=hub["andy"]).json()
     client.put(f"{url}/members/marcus", json={"groups": [{"id": makers["id"], "roles": ["MAKER"]}]}, headers=hub["andy"])
     doc_id, result = _upload_and_submit(client, hub, repo)
-    assert result["done"] == [] and "no user group named default" in result["skipped"][0]["reason"]
+    assert "no user group named default" in result["detail"]
+    assert client.get(f"{url}/documents/{doc_id}", headers=hub["marcus"]).json()["status"] == "draft"
 
 
 def test_the_default_flow_with_a_default_group(client, hub):

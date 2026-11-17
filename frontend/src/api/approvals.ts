@@ -54,6 +54,14 @@ export const getApproval = (t: string, id: string) => api<Approval>(t, `/approva
 export const decide = (t: string, id: string, decision: DecisionKind, comment = "") =>
   api<void>(t, `/approvals/${id}/decision`, { method: "POST", body: JSON.stringify({ decision, comment }) });
 
+/** The same decision and comment for several items, all or none: if any is no longer waiting for
+ * the person, nothing is decided (409). */
+export const decideMany = (t: string, ids: string[], decision: DecisionKind, comment = "") =>
+  api<{ decided: number }>(t, "/approvals/decisions", {
+    method: "POST",
+    body: JSON.stringify({ task_ids: ids, decision, comment }),
+  });
+
 /** Download the file an approval points to. */
 export const downloadFor = (t: string, a: Approval) =>
   a.summary.download ? downloadPath(t, a.summary.download.href, a.summary.download.filename) : Promise.resolve();

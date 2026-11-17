@@ -6,7 +6,7 @@
     GET  /api/doc-repos/{id}/documents/{doc}/download     docs.repository.view
     GET  /api/doc-repos/{id}/documents/{doc}/history      docs.repository.view   its approval requests and decisions
     PUT  /api/doc-repos/{id}/documents/{doc}/metadata     docs.document.upload   not when pending or approved
-    POST /api/doc-repos/{id}/documents/submit             docs.document.upload   {ids}: send for approval
+    POST /api/doc-repos/{id}/documents/submit             docs.document.upload   {ids, statuses}: send for approval (all or none)
     POST /api/doc-repos/{id}/documents/delete             docs.document.upload   {ids}: soft delete
 
 Decisions happen on the Approvals page (/api/approvals), never here.
@@ -41,6 +41,7 @@ from app.documents.schemas import (
     MetadataEntryOut,
     MetadataUpdate,
     SkippedOut,
+    SubmitIn,
 )
 from app.documents.service import RepoAccess
 
@@ -154,12 +155,14 @@ def update_metadata(doc_repo_id: DocRepoId, document_id: DocumentId, body: Metad
     return _one(db, user, doc_repo_id, document_id)
 
 
-@router.post("/doc-repos/{doc_repo_id}/documents/submit", response_model=BulkOut)
+@router.post("/doc-repos/{doc_repo_id}/documents/submit", response_model=BulkOut,
+             responses={409: {"description": "One changed since it was chosen, or was refused: nothing submitted"}})
 @Can(P.DOC_UPLOAD, at=at_repo())
-def submit_documents(doc_repo_id: DocRepoId, body: DocumentIds, db: Db, p: CurrentUser) -> BulkOut:
-    """Send documents for approval; they appear on the repository checkers' Approvals page."""
+def submit_documents(doc_repo_id: DocRepoId, body: SubmitIn, db: Db, p: CurrentUser) -> BulkOut:
+    """Send documents for approval, all or none; they appear on the repository checkers' Approvals
+    page. 409 (nothing submitted) when any has changed since it was chosen or the flow refuses any."""
     user = me(db, p)
-    return _bulk(db, user, doc_repo_id, docs.submit(db, user, doc_repo_id, body.ids))
+    return _bulk(db, user, doc_repo_id, docs.submit(db, user, doc_repo_id, body.ids, body.statuses))
 
 
 @router.post("/doc-repos/{doc_repo_id}/documents/delete", response_model=BulkOut)

@@ -378,11 +378,6 @@
   cursor: progress;
 }
 
-.btn-primary svg {
-  width: 18px;
-  height: 18px;
-}
-
 .btn-danger {
   display: inline-flex;
   align-items: center;

@@ -47,6 +47,15 @@ class DecisionIn(BaseModel):
     comment: str = Field(default="", max_length=4000, description="Required unless approving")
 
 
+class BulkDecisionIn(DecisionIn):
+    task_ids: list[uuid.UUID] = Field(min_length=1, max_length=500,
+                                      description="Tasks to decide, all or none; the comment is recorded on each")
+
+
+class BulkDecisionOut(BaseModel):
+    decided: int
+
+
 class DecisionOut(BaseModel):
     decision: str = Field(description="APPROVED, REJECTED or CHANGES_REQUESTED")
     comment: str | None

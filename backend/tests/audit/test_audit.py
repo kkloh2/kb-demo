@@ -89,7 +89,7 @@ def test_a_refused_submission_is_audited_though_nothing_else_is_kept(client, hub
     [doc_id] = [d["id"] for d in client.post(f"{url}/documents", headers=hub["marcus"],
                                              files=[("files", ("r.pdf", PDF, "application/pdf"))]).json()]
     r = client.post(f"{url}/documents/submit", json={"ids": [doc_id]}, headers=hub["marcus"])
-    assert r.json()["done"] == [] and r.json()["skipped"]
+    assert r.status_code == 409 and "no user group named default" in r.json()["detail"]
     [refused] = events(client, hub["admin"], action="APPROVAL_REFUSED")
     assert "no user group named default" in refused["details"]["reason"] and refused["source_system"] == "APPROVALS"
     assert events(client, hub["admin"], action="APPROVAL_SUBMITTED") == []  # rolled back with the attempt

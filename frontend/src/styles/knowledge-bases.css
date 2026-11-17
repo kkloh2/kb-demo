@@ -96,11 +96,6 @@
   box-shadow: var(--focus-ring);
 }
 
-.btn-primary svg {
-  width: 18px;
-  height: 18px;
-}
-
 /* ---------- Toolbar ---------- */
 .toolbar {
   display: flex;

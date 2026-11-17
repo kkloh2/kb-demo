@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { listApprovals, type ApprovalListItem } from "../../api/approvals";
+import { decideMany, listApprovals, type ApprovalListItem, type DecisionKind } from "../../api/approvals";
 import { ApiError } from "../../api/http";
-import { EyeIcon, FileIcon, SearchIcon } from "../../components/Icons";
+import { ApproveIcon, EyeIcon, FileIcon, RejectIcon, RequestChangesIcon, SearchIcon } from "../../components/Icons";
 import { Modal } from "../../components/Modal";
 import { Pager, usePagination } from "../../components/Pager";
 import { timeAgo } from "../../lib/time";
@@ -13,6 +13,22 @@ import "../../styles/kb-detail.css"; // table, notices
 import "../../styles/doc-repos.css"; // metadata lists
 import "../../styles/approvals.css";
 import { MessageBar } from "../../components/MessageBar";
+import { SelectAll } from "../../components/SelectAll";
+
+const BULK: Record<DecisionKind, { title: string; button: string; busy: string; done: string; label: string; placeholder: string }> = {
+  approve: {
+    title: "Approve", button: "Approve", busy: "Approving…", done: "Approved",
+    label: "Comment (optional)", placeholder: "Recorded on each decision",
+  },
+  request_changes: {
+    title: "Request changes", button: "Request changes", busy: "Sending…", done: "Requested changes to",
+    label: "What needs changing", placeholder: "e.g. Add the effective date",
+  },
+  reject: {
+    title: "Reject", button: "Reject", busy: "Rejecting…", done: "Rejected",
+    label: "Reason for rejecting", placeholder: "Why they can't be approved",
+  },
+};
 
 interface Props {
   token: string;
@@ -22,6 +38,7 @@ interface Props {
 /**
  * Approvals: everything waiting for the signed-in person's decision, oldest first. Each item comes
  * from a group where they hold the deciding role (for documents: CHECKER of that repository).
+ * Ticked items (from any repository) can be decided together with one comment, all or none.
  */
 export function ApprovalsPage({ token, onSessionEnded }: Props) {
   const [items, setItems] = useState<ApprovalListItem[] | null>(null);
@@ -29,12 +46,17 @@ export function ApprovalsPage({ token, onSessionEnded }: Props) {
   const [open, setOpen] = useState<ApprovalListItem | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulk, setBulk] = useState<DecisionKind | null>(null);
+  const [comment, setComment] = useState("");
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
     listApprovals(token)
       .then((a) => {
         setItems(a);
-        setError(null);
+        const ids = new Set(a.map((i) => i.id)); // ticks on items that have gone are dropped
+        setSelected((sel) => (sel.size && [...sel].some((id) => !ids.has(id)) ? new Set([...sel].filter((id) => ids.has(id))) : sel));
       })
       .catch((e) => {
         if (e instanceof ApiError && e.status === 401) onSessionEnded(e.message);
@@ -51,6 +73,50 @@ export function ApprovalsPage({ token, onSessionEnded }: Props) {
     );
   }, [items, query]);
   const { rows, ...pager } = usePagination(filtered);
+
+  // A new search starts a new selection; "select all" covers everything it matches.
+  useEffect(() => setSelected(new Set()), [query]);
+  const tickedHere = filtered.filter((a) => selected.has(a.id)).length;
+  const chosen = (items ?? []).filter((a) => selected.has(a.id));
+
+  function toggle(id: string) {
+    setSelected((sel) => {
+      const next = new Set(sel);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }
+
+  function startBulk(kind: DecisionKind) {
+    setComment("");
+    setBulk(kind);
+  }
+
+  async function decideSelected() {
+    if (!bulk) return;
+    const kind = bulk;
+    const n = selected.size;
+    setBusy(true);
+    setError(null);
+    try {
+      await decideMany(token, [...selected], kind, comment.trim());
+      setNotice(`${BULK[kind].done} ${n} item${n === 1 ? "" : "s"}.`);
+      setSelected(new Set());
+      setBulk(null);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) onSessionEnded(e.message);
+      else {
+        setError(e instanceof Error ? e.message : "Something went wrong.");
+        setBulk(null);
+        if (e instanceof ApiError && e.status === 409) setSelected(new Set());
+      }
+    } finally {
+      setBusy(false);
+      load();
+    }
+  }
+
+  const needsComment = bulk !== null && bulk !== "approve";
 
   return (
     <div className="page">
@@ -69,6 +135,35 @@ export function ApprovalsPage({ token, onSessionEnded }: Props) {
                 placeholder="Search approvals" aria-label="Search approvals" />
             </label>
           </div>
+          <div className="toolbar__right bulk-actions">
+            <span className="selection-count" aria-live="polite">
+              {selected.size === 0 ? (
+                "Select items to decide on them together"
+              ) : (
+                <>
+                  <strong>{selected.size} selected</strong>
+                  <button type="button" className="btn-link" onClick={() => setSelected(new Set())}>
+                    Clear
+                  </button>
+                </>
+              )}
+            </span>
+            <button type="button" className="btn-secondary" disabled={selected.size === 0 || busy}
+              onClick={() => startBulk("reject")}>
+              <RejectIcon />
+              Reject
+            </button>
+            <button type="button" className="btn-secondary" disabled={selected.size === 0 || busy}
+              onClick={() => startBulk("request_changes")}>
+              <RequestChangesIcon />
+              Request changes
+            </button>
+            <button type="button" className="btn-primary" disabled={selected.size === 0 || busy}
+              onClick={() => startBulk("approve")}>
+              <ApproveIcon />
+              Approve
+            </button>
+          </div>
         </div>
 
         {items === null && !error ? (
@@ -81,6 +176,7 @@ export function ApprovalsPage({ token, onSessionEnded }: Props) {
           <div className="kb-table-panel">
             <table className="data-table approvals-table">
               <colgroup>
+                <col style={{ width: "44px" }} />
                 <col />
                 <col style={{ width: "120px" }} />
                 <col style={{ width: "18%" }} />
@@ -89,6 +185,10 @@ export function ApprovalsPage({ token, onSessionEnded }: Props) {
               </colgroup>
               <thead>
                 <tr>
+                  <th scope="col" className="check-cell">
+                    <SelectAll selected={tickedHere} total={filtered.length} label="Select all"
+                      onChange={(all) => setSelected(all ? new Set(filtered.map((a) => a.id)) : new Set())} />
+                  </th>
                   <th scope="col">Item</th>
                   <th scope="col">Type</th>
                   <th scope="col">Submitted by</th>
@@ -101,6 +201,10 @@ export function ApprovalsPage({ token, onSessionEnded }: Props) {
               <tbody>
                 {rows.map((a) => (
                   <tr key={a.id}>
+                    <td className="check-cell">
+                      <input type="checkbox" className="row-check" aria-label={`Select ${a.title}`}
+                        checked={selected.has(a.id)} onChange={() => toggle(a.id)} />
+                    </td>
                     <td>
                       <button type="button" className="doc-name doc-name--button" onClick={() => setOpen(a)}>
                         <span className={`doc-name__icon doc-name__icon--${extKind(a.title)}`}>
@@ -134,6 +238,47 @@ export function ApprovalsPage({ token, onSessionEnded }: Props) {
           </div>
         )}
       </section>
+
+      <Modal open={bulk !== null} title={bulk ? `${BULK[bulk].title}: ${chosen.length} item${chosen.length === 1 ? "" : "s"}` : ""}
+        onClose={() => !busy && setBulk(null)}>
+        {bulk && (
+          <>
+            <div className="modal__body bulk-confirm">
+              <p className="modal__text">
+                The same decision and comment are recorded on each item. If any was decided or withdrawn after you
+                selected it, none is decided.
+              </p>
+              <ul className="selection-list">
+                {chosen.map((a) => (
+                  <li key={a.id}>
+                    <span className={`doc-name__icon doc-name__icon--${extKind(a.title)}`}>
+                      <FileIcon />
+                    </span>
+                    <span className="selection-list__name" title={a.title}>{a.title}</span>
+                    <span className="selection-list__meta" title={a.resource_name}>{a.resource_name}</span>
+                  </li>
+                ))}
+              </ul>
+              <label className="form-field">
+                <span>{BULK[bulk].label}</span>
+                <textarea rows={3} value={comment} onChange={(e) => setComment(e.target.value)} autoFocus
+                  placeholder={BULK[bulk].placeholder} maxLength={4000} />
+                {needsComment && <small>Each maker sees this note.</small>}
+              </label>
+            </div>
+            <div className="modal__footer">
+              <button type="button" className="btn-secondary" disabled={busy} onClick={() => setBulk(null)}>
+                Cancel
+              </button>
+              <button type="button" className={bulk === "reject" ? "btn-danger" : "btn-primary"}
+                disabled={busy || chosen.length === 0 || (needsComment && !comment.trim())} onClick={decideSelected}>
+                {bulk === "approve" ? <ApproveIcon /> : bulk === "reject" ? <RejectIcon /> : <RequestChangesIcon />}
+                {busy ? BULK[bulk].busy : `${BULK[bulk].button} ${chosen.length}`}
+              </button>
+            </div>
+          </>
+        )}
+      </Modal>
 
       <Modal open={open !== null} wide title={open?.kind_label ?? "Approval"} onClose={() => setOpen(null)}>
         {open && (

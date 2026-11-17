@@ -167,6 +167,12 @@ class DocumentIds(BaseModel):
     ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
 
 
+class SubmitIn(DocumentIds):
+    statuses: dict[uuid.UUID, str] = Field(
+        default_factory=dict,
+        description="The status each document had when it was chosen; if any differs now, nothing is submitted")
+
+
 class SkippedOut(BaseModel):
     id: uuid.UUID
     filename: str

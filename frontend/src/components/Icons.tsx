@@ -149,6 +149,28 @@ export const CheckIcon = () => (
   </svg>
 );
 
+// Decision icons for a row of buttons, sized to look equally big rather than to measure the same: an
+// X's strokes fill its box corner to corner, so it's drawn smaller (13 units) than the check (15) and
+// the pencil (16). Their edges differ by at most 1.5 units, about 1px at 16px.
+export const RejectIcon = () => (
+  <svg {...base}>
+    <path d="M5.5 5.5l13 13M18.5 5.5l-13 13" />
+  </svg>
+);
+
+export const ApproveIcon = () => (
+  <svg {...base}>
+    <path d="M4.5 12.5l5 5L19.5 7" />
+  </svg>
+);
+
+export const RequestChangesIcon = () => (
+  <svg {...base}>
+    <path d="M4 20h4L19 9l-4-4L4 16z" />
+    <path d="M13.5 6.5l4 4" />
+  </svg>
+);
+
 
 /** Approvals: a clipboard with a tick. */
 export const ApprovalsIcon = () => (

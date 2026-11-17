@@ -120,3 +120,28 @@ body {
   width: 14px;
   height: 14px;
 }
+
+/* ---------- Buttons with icons (every page) ----------
+   One rule for every button kind: 16px icons, 8px from the label, never wrapping. The side with an
+   icon gets 12px of padding instead of 20px, because the icon's glyph has blank space of its own; this
+   keeps the visible space before an icon close to the space after it. */
+:is(.btn-primary, .btn-secondary, .btn-outline, .btn-danger) {
+  gap: var(--sp-2);
+  white-space: nowrap;
+}
+
+:is(.btn-primary, .btn-secondary, .btn-outline, .btn-danger) > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+:is(.btn-primary, .btn-secondary, .btn-outline, .btn-danger):has(> svg:first-child) {
+  padding-left: var(--sp-3);
+}
+
+/* (an icon after the label, like Add's chevron; a lone leading icon is also its last element child) */
+:is(.btn-primary, .btn-secondary, .btn-outline, .btn-danger):has(> svg:last-child:not(:first-child)) {
+  padding-right: var(--sp-3);
+}

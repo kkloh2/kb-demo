@@ -21,7 +21,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.access.catalog import P, SystemCode
@@ -271,29 +271,77 @@ def _listing(doc: Document) -> dict:
                          if doc.maker else None}}
 
 
-def submit(db: Session, user: AppUser, repo_id: uuid.UUID, ids: list[uuid.UUID]) -> BulkResult:
-    """Send documents for approval. Any that can't go are skipped, with the reason. Commits."""
-    repo, docs = _load_many(db, user, repo_id, ids)
-    done, skipped = [], []
+def _problems_message(problems: list[str], verb: str) -> str:
+    n = len(problems)
+    shown = "; ".join(problems[:10]) + (f"; and {n - 10} more" if n > 10 else "")
+    return f"Nothing was {verb}: {shown}. Refresh and try again."
+
+
+def submit(db: Session, user: AppUser, repo_id: uuid.UUID, ids: list[uuid.UUID],
+           expected: dict[uuid.UUID, str] | None = None) -> BulkResult:
+    """Send documents for approval, all or none. `expected`: the status each document had when the
+    maker chose it. If any has changed since (another maker submitted or deleted it, a checker decided
+    it), or the flow refuses any, nothing is submitted: Conflict, naming each. Commits."""
+    if not ids:
+        raise InvalidRequest("Choose at least one document.")
+    ids = list(dict.fromkeys(ids))
+    expected = expected or {}
+    repo = get_repo(db, repo_id)
+    statuses = access_to(db, user, repo).visible_statuses()
+    found = {d.id: d for d in db.scalars(
+        select(Document).where(Document.doc_repo_id == repo_id, Document.id.in_(ids))
+        .options(selectinload(Document.maker)))}
+    missing = [i for i in ids if i not in found or (found[i].deleted_at is None and found[i].status not in statuses)]
+    if missing:
+        raise NotFound(f"No document {', '.join(map(str, missing))} in this repository.")
+    docs = [found[i] for i in ids]
+
+    problems = []
     for doc in docs:
-        if doc.status not in EDITABLE:
-            skipped.append(Skipped(doc.id, doc.filename, f"It's {_label(doc.status)}."))
-            continue
-        summary, snapshot = summary_and_snapshot(db, repo, doc, doc.maker)
-        try:
-            with db.begin_nested():  # a refused document leaves nothing behind
-                request = approvals.request_approval(
-                    db, TYPE_CODE, resource_id=str(repo.id), subject_id=str(doc.id), title=doc.filename,
-                    payload=summary, snapshot=snapshot, requester=user, maker=doc.maker, listing=_listing(doc))
-        except approvals.Refused as e:
-            skipped.append(Skipped(doc.id, doc.filename, str(e)))
-            audit.record(db, "APPROVAL_REFUSED", actor=user, target=("document", doc.id), node_id=repo.node.id,
-                         details={"filename": doc.filename, "reason": str(e)}, source_system="APPROVALS")
-            continue
-        doc.status, doc.submitted_at, doc.latest_approval_request_id = S.PENDING.value, utcnow(), request.id
-        done.append(doc)
-    db.commit()
-    return BulkResult(done, skipped)
+        if doc.deleted_at is not None:
+            problems.append(f"{doc.filename} was deleted")
+        elif doc.status not in EDITABLE:
+            problems.append(f"{doc.filename} is now {_label(doc.status)}")
+        elif doc.id in expected and expected[doc.id] != doc.status:
+            problems.append(f"{doc.filename} is now {_label(doc.status)}")
+    if problems:
+        raise Conflict(_problems_message(problems, "submitted"))
+
+    refused: list[tuple[Document, str]] = []
+    try:
+        for doc in docs:
+            # Claim the document: only if its status is still what was read. Another maker's submit or
+            # delete, or a decision, in between makes this match nothing, and the whole batch rolls back.
+            claimed = db.execute(
+                update(Document).where(Document.id == doc.id, Document.status == doc.status,
+                                       Document.deleted_at.is_(None))
+                .values(status=S.PENDING.value, submitted_at=utcnow()))  # also updates `doc` in the session
+            if claimed.rowcount != 1:
+                raise Conflict(_problems_message([f"{doc.filename} changed while submitting"], "submitted"))
+            summary, snapshot = summary_and_snapshot(db, repo, doc, doc.maker)
+            try:
+                with db.begin_nested():  # a refused document leaves nothing of its own behind
+                    request = approvals.request_approval(
+                        db, TYPE_CODE, resource_id=str(repo.id), subject_id=str(doc.id), title=doc.filename,
+                        payload=summary, snapshot=snapshot, requester=user, maker=doc.maker, listing=_listing(doc))
+            except approvals.Refused as e:
+                refused.append((doc, str(e)))
+                continue
+            doc.latest_approval_request_id = request.id
+        if refused:
+            raise Conflict(_problems_message([f"{d.filename}: {why}" for d, why in refused], "submitted"))
+        db.commit()
+    except Exception:
+        db.rollback()
+        if refused:  # the refusals are kept on record though the batch isn't
+            for d, why in refused:
+                audit.record(db, "APPROVAL_REFUSED", actor=user, target=("document", d.id), node_id=repo.node.id,
+                             details={"filename": d.filename, "reason": why}, source_system="APPROVALS")
+            db.commit()
+        raise
+    for doc in docs:
+        db.refresh(doc)
+    return BulkResult(docs, [])
 
 
 def delete_documents(db: Session, user: AppUser, repo_id: uuid.UUID, ids: list[uuid.UUID]) -> BulkResult:
