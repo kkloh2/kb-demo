@@ -237,8 +237,8 @@ export function DocumentPanel({ token, docRepoId, documentId, onClose, onChanged
 
         {/* ---------------------------------------------------------------- own fields */}
         <section className="meta-section">
-          <h4 className="meta-section__title">Additional fields</h4>
-          <p className="meta-section__desc">Anything else worth recording about this document.</p>
+          <h4 className="meta-section__title">Additional metadata</h4>
+          <p className="meta-section__desc">Metadata specific to this document, beyond what the repository defines.</p>
           {own.length === 0 && !editable && <p className="muted">None.</p>}
           {own.map((e, i) => (
             <div key={i} className="extra-row">

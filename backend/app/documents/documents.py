@@ -253,7 +253,7 @@ def summary_and_snapshot(db: Session, repo: DocRepo, doc: Document, maker: AppUs
                   {"label": "Uploaded by", "value": maker.display_name if maker else ""}],
         "sections": [s for s in (
             {"title": "Repository metadata", "items": shown},
-            {"title": "Additional fields", "items": own} if own else None,
+            {"title": "Additional metadata", "items": own} if own else None,
         ) if s],
         "download": {"href": f"/doc-repos/{repo.id}/documents/{doc.id}/download", "filename": doc.filename},
         "link": {"label": "Open the repository", "href": f"#doc-repo/{repo.id}"},
