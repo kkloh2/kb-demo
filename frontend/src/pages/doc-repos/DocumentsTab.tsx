@@ -31,6 +31,7 @@ import { timeAgo } from "../../lib/time";
 import { DocumentPanel } from "./DocumentPanel";
 import { MessageBar } from "../../components/MessageBar";
 import { SelectAll } from "../../components/SelectAll";
+import { SortHeader, useSort } from "../../components/Sort";
 
 // Must match the server's allowed_upload_extensions; anything else in a folder is left out.
 const ALLOWED = [".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".csv", ".txt", ".md"];
@@ -131,7 +132,13 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
     };
   }, [docs, folder, matches, searching]);
 
-  const { rows, ...pager } = usePagination(files);
+  const { sorted, sort, toggle: sortBy } = useSort(files, {
+    name: { value: (d) => d.filename },
+    status: { value: (d) => STATUS_LABEL[d.status] },
+    maker: { value: (d) => d.maker?.display_name },
+    updated: { value: (d) => d.updated_at, desc: true },
+  });
+  const { rows, ...pager } = usePagination(sorted);
 
   // A different folder, search or filter starts a new selection; "select all" covers what it shows.
   useEffect(() => setSelected(new Map()), [folder, query, status]);
@@ -214,11 +221,18 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
     setBusy(`Uploading ${usable.length}…`);
     setNotice(null);
     try {
-      const created = await uploadDocuments(token, docRepo.id, usable);
+      const uploaded = await uploadDocuments(token, docRepo.id, usable);
+      const count = (o: string) => uploaded.filter((d) => d.outcome === o).length;
+      const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+      const parts = [
+        count("new") && plural(count("new"), "new document", "new documents"),
+        count("version") && plural(count("version"), "new version of an existing document", "new versions of existing documents"),
+        count("replaced") && plural(count("replaced"), "replaced draft", "replaced drafts"),
+      ].filter(Boolean);
       setNotice({
         kind: "ok",
         text:
-          `Uploaded ${created.length} file${created.length === 1 ? "" : "s"} as drafts. ` +
+          `Uploaded ${plural(uploaded.length, "file", "files")}: ${parts.join(", ")}. ` +
           (left ? `Left out ${left} (hidden, empty or not an allowed type). ` : "") +
           "Open each to check its metadata, then submit it for approval.",
       });
@@ -367,10 +381,10 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
                         label="Select all drafts and documents sent back for changes" />
                     </th>
                   )}
-                  <th scope="col">Name</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Uploaded by</th>
-                  <th scope="col">Updated</th>
+                  <SortHeader label="Name" sortKey="name" sort={sort} onSort={sortBy} />
+                  <SortHeader label="Status" sortKey="status" sort={sort} onSort={sortBy} />
+                  <SortHeader label="Uploaded by" sortKey="maker" sort={sort} onSort={sortBy} />
+                  <SortHeader label="Updated" sortKey="updated" sort={sort} onSort={sortBy} />
                   <th scope="col">
                     <span className="sr-only">Actions</span>
                   </th>
@@ -412,6 +426,7 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
                           <span className="truncate">{d.filename}</span>
                           <span className="doc-name__sub">
                             {searching && d.folder ? `${d.folder} · ` : ""}
+                            {`Version ${d.version} · `}
                             {formatSize(d.size_bytes)}
                           </span>
                         </span>

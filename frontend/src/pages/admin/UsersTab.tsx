@@ -4,6 +4,7 @@ import { listSources, setGroupRoles, type SourceSystem } from "../../api/sources
 import { ApiError } from "../../api/http";
 import { EditIcon, PlusIcon, SearchIcon } from "../../components/Icons";
 import { Modal } from "../../components/Modal";
+import { SortHeader, useSort } from "../../components/Sort";
 import { Pager, usePagination } from "../../components/Pager";
 import { timeAgo } from "../../lib/time";
 import type { AdminTabProps } from "../AdminPage";
@@ -32,7 +33,16 @@ export function UsersTab({ token, user: me, onSessionEnded }: AdminTabProps) {
     const q = query.trim().toLowerCase();
     return q ? (users ?? []).filter((u) => u.lan_id.includes(q)) : users ?? [];
   }, [users, query]);
-  const { rows, ...pager } = usePagination(filtered);
+  const { sorted, sort, toggle } = useSort(filtered, {
+    name: { value: (u) => u.display_name },
+    lan_id: { value: (u) => u.lan_id },
+    email: { value: (u) => u.email },
+    department: { value: (u) => u.directory_department },
+    last_login: { value: (u) => u.last_login_at, desc: true },
+    created: { value: (u) => u.created_at, desc: true },
+    updated: { value: (u) => u.updated_at, desc: true },
+  });
+  const { rows, ...pager } = usePagination(sorted);
 
   return (
     <section className="panel" aria-label="Users">
@@ -73,13 +83,13 @@ export function UsersTab({ token, user: me, onSessionEnded }: AdminTabProps) {
             </colgroup>
             <thead>
               <tr>
-                <th scope="col">Name</th>
-                <th scope="col">LAN ID</th>
-                <th scope="col">Email</th>
-                <th scope="col">Department</th>
-                <th scope="col">Last sign-in</th>
-                <th scope="col">Created</th>
-                <th scope="col">Last updated</th>
+                <SortHeader label="Name" sortKey="name" sort={sort} onSort={toggle} />
+                <SortHeader label="LAN ID" sortKey="lan_id" sort={sort} onSort={toggle} />
+                <SortHeader label="Email" sortKey="email" sort={sort} onSort={toggle} />
+                <SortHeader label="Department" sortKey="department" sort={sort} onSort={toggle} />
+                <SortHeader label="Last sign-in" sortKey="last_login" sort={sort} onSort={toggle} />
+                <SortHeader label="Created" sortKey="created" sort={sort} onSort={toggle} />
+                <SortHeader label="Last updated" sortKey="updated" sort={sort} onSort={toggle} />
                 <th scope="col">
                   <span className="visually-hidden">Actions</span>
                 </th>

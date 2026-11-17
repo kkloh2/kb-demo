@@ -377,47 +377,7 @@
   border-right: 1px solid var(--border-strong);
 }
 
-.kb-table__th {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  min-width: 0;
-}
-
-.kb-table__th-label {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.kb-table__sort {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border: 0;
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-
-.kb-table__sort:hover {
-  background: var(--gray-100);
-  color: var(--text-primary);
-}
-
-.kb-table__sort:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-.kb-table__sort svg {
-  width: 16px;
-  height: 16px;
-}
+/* .kb-table__th, __th-label and __sort (sortable headers) are in tokens.css: every table uses them. */
 
 .kb-table td {
   height: 56px;

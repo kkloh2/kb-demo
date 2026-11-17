@@ -47,7 +47,38 @@ export interface DocRepoDocument {
   submitted_at: string | null;
   last_decision: Decision | null;
   metadata: MetadataEntry[];
-  actions: { edit: boolean; submit: boolean; delete: boolean };
+  actions: {
+    edit: boolean;
+    submit: boolean;
+    delete: boolean;
+    discard: boolean; // throw away the latest version, back to the one before
+    versions: boolean; // may see every version (makers, checkers, auditors)
+  };
+  version: number; // the version shown: the latest, or for viewers the latest approved one
+  uploaded_at: string; // when that version's file was uploaded
+  latest: boolean; // false when an earlier, approved version is shown
+  approved_version: number | null; // the latest approved version's number
+  outcome?: "new" | "replaced" | "version" | null; // after an upload
+}
+
+/** One version of a document, from its history. */
+export interface DocumentVersion {
+  number: number;
+  filename: string;
+  content_type: string | null;
+  size_bytes: number;
+  status: DocumentStatus;
+  uploaded_by: PersonRef | null;
+  created_at: string;
+  submitted_at: string | null;
+  superseded_at: string | null;
+  discarded_at: string | null;
+  restored_from: number | null;
+  approval_request_id: string | null; // matches RequestHistory.id
+  latest: boolean;
+  approved: boolean; // the latest approved version: what viewers see
+  last_decision: Decision | null;
+  can_restore: boolean;
 }
 
 export interface BulkResult {
@@ -87,6 +118,12 @@ export const getDocument = (t: string, repoId: string, id: string) =>
   api<DocRepoDocument>(t, `${base(repoId)}/documents/${id}`);
 export const documentHistory = (t: string, repoId: string, id: string) =>
   api<RequestHistory[]>(t, `${base(repoId)}/documents/${id}/history`);
+export const listVersions = (t: string, repoId: string, id: string) =>
+  api<DocumentVersion[]>(t, `${base(repoId)}/documents/${id}/versions`);
+export const restoreVersion = (t: string, repoId: string, id: string, n: number) =>
+  api<DocRepoDocument>(t, `${base(repoId)}/documents/${id}/versions/${n}/restore`, { method: "POST" });
+export const discardVersion = (t: string, repoId: string, id: string) =>
+  api<DocRepoDocument>(t, `${base(repoId)}/documents/${id}/discard-version`, { method: "POST" });
 
 /** Upload files; for a folder upload, each file's relative path keeps the folder structure. */
 export function uploadDocuments(t: string, repoId: string, files: { file: File; path: string }[]) {
@@ -125,6 +162,8 @@ export async function downloadPath(t: string, path: string, filename: string): P
 
 export const downloadDocument = (t: string, doc: DocRepoDocument) =>
   downloadPath(t, `${base(doc.doc_repo_id)}/documents/${doc.id}/download`, doc.filename);
+export const downloadVersion = (t: string, doc: DocRepoDocument, v: DocumentVersion) =>
+  downloadPath(t, `${base(doc.doc_repo_id)}/documents/${doc.id}/versions/${v.number}/download`, v.filename);
 
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

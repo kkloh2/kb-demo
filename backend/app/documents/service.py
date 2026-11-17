@@ -34,6 +34,8 @@ register_actions("DOC_HUB", {
     "DOCUMENT_METADATA_SET": ("content", "Document metadata changed"),
     "DOCUMENTS_DELETED": ("content", "Documents deleted"),
     "DOCUMENT_DOWNLOADED": ("content", "Document downloaded"),
+    "DOCUMENT_VERSION_DISCARDED": ("content", "Document version discarded"),
+    "DOCUMENT_VERSION_RESTORED": ("content", "Earlier document version restored"),
 })
 
 
@@ -89,16 +91,22 @@ class RepoWithAccess:
 
 
 def _counts(db: Session, items: list[tuple[DocRepo, RepoAccess]]) -> dict[uuid.UUID, int]:
-    by_status: dict[uuid.UUID, dict[str, int]] = {}
+    by_status: dict[uuid.UUID, dict[tuple[str, bool], int]] = {}
     ids = [r.id for r, _ in items]
     if ids:
-        for repo_id, status, n in db.execute(
-            select(Document.doc_repo_id, Document.status, func.count())
+        has_approved = Document.approved_version.is_not(None)
+        for repo_id, status, approved, n in db.execute(
+            select(Document.doc_repo_id, Document.status, has_approved, func.count())
             .where(Document.doc_repo_id.in_(ids), Document.deleted_at.is_(None))
-            .group_by(Document.doc_repo_id, Document.status)
+            .group_by(Document.doc_repo_id, Document.status, has_approved)
         ):
-            by_status.setdefault(repo_id, {})[status] = n
-    return {r.id: sum(n for s, n in by_status.get(r.id, {}).items() if s in a.visible_statuses()) for r, a in items}
+            by_status.setdefault(repo_id, {})[(status, bool(approved))] = n
+
+    def seen(a: RepoAccess, status: str, approved: bool) -> bool:  # see versions.views
+        statuses = a.visible_statuses()
+        return status in statuses or (approved and S.APPROVED.value in statuses)
+
+    return {r.id: sum(n for (s, ap), n in by_status.get(r.id, {}).items() if seen(a, s, ap)) for r, a in items}
 
 
 def list_repos(db: Session, user: AppUser) -> list[RepoWithAccess]:

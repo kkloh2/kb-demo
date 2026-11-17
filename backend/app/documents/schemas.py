@@ -130,6 +130,8 @@ class DocumentActionsOut(BaseModel):
     edit: bool
     submit: bool
     delete: bool
+    discard: bool = Field(description="Throw away the latest version and go back to the one before")
+    versions: bool = Field(description="May see every version (GET .../versions)")
 
 
 class DocumentOut(BaseModel):
@@ -147,6 +149,30 @@ class DocumentOut(BaseModel):
     last_decision: DecisionRef | None
     metadata: list[MetadataEntryOut]
     actions: DocumentActionsOut
+    version: int = Field(description="The version shown: the latest, or for viewers the latest approved one")
+    uploaded_at: datetime = Field(description="When the shown version's file was uploaded")
+    latest: bool = Field(description="False when an earlier, approved version is shown because the latest isn't visible")
+    approved_version: int | None = Field(description="The latest approved version's number, if any")
+    outcome: str | None = Field(default=None, description="After an upload: new, replaced (the draft's file) or version")
+
+
+class VersionOut(BaseModel):
+    number: int
+    filename: str
+    content_type: str | None
+    size_bytes: int
+    status: str
+    uploaded_by: PersonRef | None
+    created_at: datetime
+    submitted_at: datetime | None
+    superseded_at: datetime | None
+    discarded_at: datetime | None
+    restored_from: int | None
+    approval_request_id: uuid.UUID | None = Field(description="Its approval request, to match the document's history")
+    latest: bool
+    approved: bool = Field(description="The latest approved version: what viewers see")
+    last_decision: DecisionRef | None
+    can_restore: bool
 
 
 class InheritedChange(BaseModel):

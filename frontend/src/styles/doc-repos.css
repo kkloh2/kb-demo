@@ -494,3 +494,71 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---------- Document versions (document panel) ---------- */
+.versions {
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  list-style: none;
+  font-size: var(--fs-sm);
+}
+
+.versions__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+}
+
+.versions__item + .versions__item {
+  border-top: 1px solid var(--border);
+}
+
+.versions__item--discarded .versions__title strong,
+.versions__item--discarded .versions__sub {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.versions__main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.versions__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.versions__sub {
+  font-size: var(--fs-xs);
+}
+
+.versions__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.modal__footer-note {
+  margin-right: auto;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.versions .badge {
+  margin: 0;
+}
+
+.versions .history__comment {
+  margin-top: var(--sp-1);
+  font-size: var(--fs-sm);
+}

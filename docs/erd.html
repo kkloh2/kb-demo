@@ -26,6 +26,9 @@ erDiagram
     doc_repo ||--o{ document : "doc_repo_id"
     app_user o|--o{ document : "maker_id"
     app_user o|--o{ document : "deleted_by_id"
+    document ||--o{ document_version : "document_id"
+    app_user o|--o{ document_version : "uploaded_by_id"
+    app_user o|--o{ document_version : "discarded_by_id"
     source_system ||--o{ hierarchy : "source_system_id"
     hierarchy ||--o{ hierarchy_node : "hierarchy_id"
     hierarchy_node o|--o{ hierarchy_node : "parent_id"
@@ -230,8 +233,31 @@ erDiagram
         uuid maker_id FK
         uuid latest_approval_request_id
         timestamptz submitted_at
+        int version
+        int approved_version
         uuid deleted_by_id FK
         timestamptz deleted_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    document_version {
+        uuid id PK
+        uuid document_id FK
+        int number
+        string filename
+        string content_type
+        int size_bytes
+        string storage_path
+        string content_hash
+        string status
+        uuid uploaded_by_id FK
+        uuid approval_request_id
+        int restored_from
+        json metadata_snapshot
+        timestamptz submitted_at
+        timestamptz superseded_at
+        timestamptz discarded_at
+        uuid discarded_by_id FK
         timestamptz created_at
         timestamptz updated_at
     }

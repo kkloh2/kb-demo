@@ -14,6 +14,7 @@ import "../../styles/doc-repos.css"; // metadata lists
 import "../../styles/approvals.css";
 import { MessageBar } from "../../components/MessageBar";
 import { SelectAll } from "../../components/SelectAll";
+import { SortHeader, useSort } from "../../components/Sort";
 
 const BULK: Record<DecisionKind, { title: string; button: string; busy: string; done: string; label: string; placeholder: string }> = {
   approve: {
@@ -34,6 +35,10 @@ interface Props {
   token: string;
   onSessionEnded: (message: string) => void;
 }
+
+/** A document's version, from what the task's metadata says about it. */
+const versionOf = (a: ApprovalListItem) =>
+  Number((a.metadata.document as { version?: number } | undefined)?.version ?? 1);
 
 /**
  * Approvals: everything waiting for the signed-in person's decision, oldest first. Each item comes
@@ -72,7 +77,13 @@ export function ApprovalsPage({ token, onSessionEnded }: Props) {
       [a.title, a.resource_name, a.kind_label, a.requested_by?.display_name ?? ""].some((v) => v.toLowerCase().includes(q)),
     );
   }, [items, query]);
-  const { rows, ...pager } = usePagination(filtered);
+  const { sorted, sort, toggle: sortBy } = useSort(filtered, {
+    title: { value: (a) => a.title },
+    kind: { value: (a) => a.kind_label },
+    by: { value: (a) => a.requested_by?.display_name },
+    at: { value: (a) => a.requested_at, desc: true },
+  }, { key: "at", dir: "asc" });
+  const { rows, ...pager } = usePagination(sorted);
 
   // A new search starts a new selection; "select all" covers everything it matches.
   useEffect(() => setSelected(new Set()), [query]);
@@ -189,10 +200,10 @@ export function ApprovalsPage({ token, onSessionEnded }: Props) {
                     <SelectAll selected={tickedHere} total={filtered.length} label="Select all"
                       onChange={(all) => setSelected(all ? new Set(filtered.map((a) => a.id)) : new Set())} />
                   </th>
-                  <th scope="col">Item</th>
-                  <th scope="col">Type</th>
-                  <th scope="col">Submitted by</th>
-                  <th scope="col">Submitted</th>
+                  <SortHeader label="Item" sortKey="title" sort={sort} onSort={sortBy} />
+                  <SortHeader label="Type" sortKey="kind" sort={sort} onSort={sortBy} />
+                  <SortHeader label="Submitted by" sortKey="by" sort={sort} onSort={sortBy} />
+                  <SortHeader label="Submitted" sortKey="at" sort={sort} onSort={sortBy} />
                   <th scope="col">
                     <span className="sr-only">Actions</span>
                   </th>
@@ -214,6 +225,7 @@ export function ApprovalsPage({ token, onSessionEnded }: Props) {
                           <span className="truncate">{a.title}</span>
                           <span className="doc-name__sub truncate">
                             {a.resource_name}
+                            {versionOf(a) > 1 ? ` · version ${versionOf(a)}` : ""}
                             {a.round > 1 ? ` · round ${a.round}` : ""}
                           </span>
                         </span>

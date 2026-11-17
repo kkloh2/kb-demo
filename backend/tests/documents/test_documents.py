@@ -30,13 +30,18 @@ def test_maker_uploads_drafts_carrying_the_repositorys_metadata(client, hub):
     assert d["status"] == "draft" and d["maker"]["lan_id"] == "marcus"
     assert meta(d) == {"Department": ("Risk Management", "inherited"), "Country": ("Singapore", "inherited")}
     assert d["metadata"][0]["from_node"] == "Loan Risks"
-    assert d["actions"] == {"edit": True, "submit": True, "delete": True}
+    assert d["actions"] == {"edit": True, "submit": True, "delete": True, "discard": False, "versions": True}
 
 
-def test_folder_upload_keeps_the_structure_and_renames_duplicates(client, hub):
-    upload(client, hub, [("a.pdf", PDF), ("a.pdf", PDF)], paths=["Policies/2026/a.pdf", "Policies/2026/a.pdf"])
+def test_folder_upload_keeps_the_structure(client, hub):
+    upload(client, hub, [("a.pdf", PDF), ("b.pdf", PDF)], paths=["Policies/2026/a.pdf", "Policies/b.pdf"])
     names = sorted((d["folder"], d["filename"]) for d in docs(client, hub, "marcus").values())
-    assert names == [("Policies/2026", "a (2).pdf"), ("Policies/2026", "a.pdf")]
+    assert names == [("Policies", "b.pdf"), ("Policies/2026", "a.pdf")]
+
+
+def test_the_same_path_twice_in_one_upload_is_refused(client, hub):
+    r = upload(client, hub, [("a.pdf", PDF), ("a.pdf", PDF)], paths=["Policies/a.pdf", "Policies/a.pdf"])
+    assert r.status_code == 422 and "Policies/a.pdf is given twice" in r.json()["detail"]
 
 
 @pytest.mark.parametrize("files, message", [
@@ -55,9 +60,15 @@ def test_only_makers_upload(client, hub, who):
     assert upload(client, hub, who=who).status_code == 403
 
 
+def stored(hub, doc_id):
+    """The files kept for a document, one folder per upload."""
+    return sorted((get_settings().upload_dir / "doc-repos" / hub["repo"] / doc_id).glob("*/*"))
+
+
 def test_files_are_stored_by_document_id(client, hub):
     d = upload(client, hub).json()[0]
-    assert (get_settings().upload_dir / "doc-repos" / hub["repo"] / d["id"] / "policy.pdf").read_bytes() == PDF
+    [path] = stored(hub, d["id"])
+    assert path.name == "policy.pdf" and path.read_bytes() == PDF
     r = client.get(f"/api/doc-repos/{hub['repo']}/documents/{d['id']}/download", headers=hub["marcus"])
     assert r.content == PDF
 
@@ -128,7 +139,7 @@ def test_soft_delete_hides_documents(client, hub):
     r = client.post(f"/api/doc-repos/{hub['repo']}/documents/delete", json={"ids": [d["id"]]}, headers=hub["marcus"])
     assert r.status_code == 200 and r.json()["skipped"] == []
     assert docs(client, hub, "marcus") == {}
-    assert (get_settings().upload_dir / "doc-repos" / hub["repo"] / d["id"] / "policy.pdf").exists()  # kept
+    assert [p.name for p in stored(hub, d["id"])] == ["policy.pdf"]  # kept
 
 
 def test_ids_from_elsewhere_are_refused(client, hub):

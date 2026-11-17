@@ -4,6 +4,7 @@ import { ApiError } from "../../api/http";
 import { createHierarchy, createSource, listSources, setGroupRoles, type SourceSystem } from "../../api/sources";
 import { EditIcon, PlusIcon, SearchIcon } from "../../components/Icons";
 import { Modal } from "../../components/Modal";
+import { SortHeader, useSort } from "../../components/Sort";
 import { Pager, usePagination } from "../../components/Pager";
 import { timeAgo } from "../../lib/time";
 import type { AdminTabProps } from "../AdminPage";
@@ -24,7 +25,12 @@ export function SourcesTab({ token, onSessionEnded }: AdminTabProps) {
   }, [token, fail]);
   useEffect(load, [load]);
 
-  const { rows, ...pager } = usePagination(sources ?? []);
+  const { sorted, sort, toggle } = useSort(sources ?? [], {
+    name: { value: (s) => s.name },
+    created: { value: (s) => s.created_at, desc: true },
+    updated: { value: (s) => s.last_updated, desc: true },
+  });
+  const { rows, ...pager } = usePagination(sorted);
   const open = sources?.find((s) => s.code === reviewing) ?? null;
 
   return (
@@ -52,9 +58,9 @@ export function SourcesTab({ token, onSessionEnded }: AdminTabProps) {
             </colgroup>
             <thead>
               <tr>
-                <th scope="col">Source system</th>
-                <th scope="col">Created</th>
-                <th scope="col">Last updated</th>
+                <SortHeader label="Source system" sortKey="name" sort={sort} onSort={toggle} />
+                <SortHeader label="Created" sortKey="created" sort={sort} onSort={toggle} />
+                <SortHeader label="Last updated" sortKey="updated" sort={sort} onSort={toggle} />
                 <th scope="col">
                   <span className="visually-hidden">Actions</span>
                 </th>
@@ -174,7 +180,13 @@ function SourceReview({
     const q = query.trim().toLowerCase();
     return q ? people.filter((p) => p.lan_id.includes(q)) : people;
   }, [people, query]);
-  const { rows, ...pager } = usePagination(filtered);
+  const { sorted, sort, toggle } = useSort(filtered, {
+    name: { value: (p) => p.display_name },
+    lan_id: { value: (p) => p.lan_id },
+    created: { value: (p) => p.added_at, desc: true },
+    updated: { value: (p) => p.updated_at, desc: true },
+  });
+  const { rows, ...pager } = usePagination(sorted);
 
   if (editing) {
     return (
@@ -236,12 +248,12 @@ function SourceReview({
                   </colgroup>
                   <thead>
                     <tr>
-                      <th scope="col">Name</th>
-                      <th scope="col">LAN ID</th>
+                      <SortHeader label="Name" sortKey="name" sort={sort} onSort={toggle} />
+                      <SortHeader label="LAN ID" sortKey="lan_id" sort={sort} onSort={toggle} />
                       <th scope="col">User groups</th>
                       <th scope="col">User group roles</th>
-                      <th scope="col">Created</th>
-                      <th scope="col">Last updated</th>
+                      <SortHeader label="Created" sortKey="created" sort={sort} onSort={toggle} />
+                      <SortHeader label="Last updated" sortKey="updated" sort={sort} onSort={toggle} />
                       <th scope="col">
                         <span className="visually-hidden">Actions</span>
                       </th>

@@ -69,7 +69,7 @@ def test_approve_locks_the_document_and_its_metadata(client, hub):
     assert decide(client, hub, "cara", task, "approve").status_code == 204
     d = doc(client, hub, doc_id)
     assert d["status"] == "approved" and d["last_decision"]["decided_by"]["lan_id"] == "cara"
-    assert d["actions"] == {"edit": False, "submit": False, "delete": False}
+    assert d["actions"] == {"edit": False, "submit": False, "delete": False, "discard": False, "versions": True}
     assert client.get(f"/api/doc-repos/{hub['repo']}/documents/{doc_id}", headers=hub["eve"]).status_code == 200
     # the repository's values change; the approved document keeps what was checked
     client.put(f"/api/doc-repos/{hub['repo']}/metadata", json=[{"label": "Country", "value": "Japan"}], headers=hub["ben"])

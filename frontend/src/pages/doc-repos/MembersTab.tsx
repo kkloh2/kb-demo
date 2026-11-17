@@ -13,6 +13,7 @@ import { ApiError } from "../../api/http";
 import { EditIcon, PlusIcon, SearchIcon } from "../../components/Icons";
 import { MessageBar } from "../../components/MessageBar";
 import { Modal } from "../../components/Modal";
+import { SortHeader, useSort } from "../../components/Sort";
 import { Pager, usePagination } from "../../components/Pager";
 import { timeAgo } from "../../lib/time";
 import { ErrorMessage, Notice, useErrors } from "../admin/common";
@@ -44,7 +45,12 @@ export function MembersTab({ token, docRepo, onSessionEnded }: Props) {
     const q = query.trim().toLowerCase();
     return (data?.members ?? []).filter((m) => !q || m.lan_id.toLowerCase().includes(q));
   }, [data, query]);
-  const { rows, ...pager } = usePagination(filtered);
+  const { sorted, sort, toggle } = useSort(filtered, {
+    name: { value: (m) => m.display_name },
+    lan_id: { value: (m) => m.lan_id },
+    updated: { value: (m) => m.updated_at, desc: true },
+  });
+  const { rows, ...pager } = usePagination(sorted);
 
   return (
     <section className="panel" aria-labelledby="members-title">
@@ -90,10 +96,10 @@ export function MembersTab({ token, docRepo, onSessionEnded }: Props) {
                 </colgroup>
                 <thead>
                   <tr>
-                    <th scope="col">Name</th>
-                    <th scope="col">LAN ID</th>
+                    <SortHeader label="Name" sortKey="name" sort={sort} onSort={toggle} />
+                    <SortHeader label="LAN ID" sortKey="lan_id" sort={sort} onSort={toggle} />
                     <th scope="col">User group roles</th>
-                    <th scope="col">Last updated</th>
+                    <SortHeader label="Last updated" sortKey="updated" sort={sort} onSort={toggle} />
                     <th scope="col">
                       <span className="visually-hidden">Actions</span>
                     </th>
@@ -130,21 +136,7 @@ export function MembersTab({ token, docRepo, onSessionEnded }: Props) {
             </>
           )}
 
-          <h3 className="panel__subtitle">Teams with access</h3>
-          {data.team_grants.length === 0 ? (
-            <p className="admin-message">None. Platform admins can give teams such as Audit read-only access.</p>
-          ) : (
-            <ul className="plain-list">
-              {data.team_grants.map((g) => (
-                <li key={`${g.team}:${g.role}`}>
-                  <strong>{g.team_name}</strong> <span className="badge badge--neutral">{roleName(g.role)}</span>{" "}
-                  <span className="muted">
-                    {g.from_default ? "Every repository gets this; set by platform admins." : "Set by platform admins."}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+          {/* Teams with access (data.team_grants) is hidden for now, at the user's request. */}
         </>
       )}
 

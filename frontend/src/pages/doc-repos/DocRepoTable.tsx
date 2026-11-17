@@ -1,12 +1,9 @@
-import { useMemo, useState } from "react";
 import { type DocRepo } from "../../api/doc-repos";
-import { MoreIcon, SortIcon } from "../../components/Icons";
+import { MoreIcon } from "../../components/Icons";
+import { SortHeader, useSort } from "../../components/Sort";
 import { Menu, type MenuItem } from "../../components/Menu";
 import { Pager, usePagination } from "../../components/Pager";
 import { timeAgo } from "../../lib/time";
-
-type SortKey = "name" | "created_by" | "updated_at";
-type SortDir = "asc" | "desc";
 
 interface Props {
   items: DocRepo[];
@@ -15,43 +12,15 @@ interface Props {
 
 /** List view of doc-repos, like main's knowledge base table: sortable columns and pagination. */
 export function DocRepoTable({ items, menuItems }: Props) {
-  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "updated_at", dir: "desc" });
-
-  const sorted = useMemo(() => {
-    const value = (p: DocRepo) =>
-      sort.key === "created_by" ? (p.created_by?.display_name ?? "").toLowerCase()
-      : sort.key === "name" ? p.name.toLowerCase()
-      : p.updated_at;
-    const out = [...items].sort((a, b) => (value(a) < value(b) ? -1 : value(a) > value(b) ? 1 : 0));
-    return sort.dir === "asc" ? out : out.reverse();
-  }, [items, sort]);
-
+  const { sorted, sort, toggle } = useSort(items, {
+    name: { value: (p) => p.name },
+    created_by: { value: (p) => p.created_by?.display_name },
+    updated_at: { value: (p) => p.updated_at, desc: true },
+  }, { key: "updated_at", dir: "desc" });
   const { rows, ...pager } = usePagination(sorted);
-
-  function sortBy(key: SortKey) {
-    setSort((s) =>
-      s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: key === "updated_at" ? "desc" : "asc" },
-    );
-  }
-
-  function header(label: string, key?: SortKey) {
-    const active = key !== undefined && sort.key === key;
-    return (
-      <th scope="col" aria-sort={key ? (active ? (sort.dir === "asc" ? "ascending" : "descending") : "none") : undefined}>
-        <div className="kb-table__th">
-          <span className="kb-table__th-label" title={label}>
-            {label}
-          </span>
-          {key && (
-            <button type="button" className="kb-table__sort" aria-label={`Sort by ${label}`} title={`Sort by ${label}`}
-              onClick={() => sortBy(key)}>
-              <SortIcon dir={active ? sort.dir : "none"} />
-            </button>
-          )}
-        </div>
-      </th>
-    );
-  }
+  const header = (label: string, key?: "name" | "created_by" | "updated_at") => (
+    <SortHeader label={label} sortKey={key} sort={sort} onSort={toggle} />
+  );
 
   return (
     <div className="kb-table-panel">

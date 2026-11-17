@@ -14,6 +14,7 @@ import {
 import { EditIcon, PlusIcon, SearchIcon } from "../../components/Icons";
 import { MessageBar } from "../../components/MessageBar";
 import { Modal } from "../../components/Modal";
+import { SortHeader, useSort } from "../../components/Sort";
 import { Pager, usePagination } from "../../components/Pager";
 import { timeAgo } from "../../lib/time";
 import "../../styles/knowledge-bases.css";
@@ -71,7 +72,13 @@ export function ApprovalWorkflowsPage({ token, onSessionEnded }: Props) {
       [w.name, w.code, w.kind_label, ...w.steps.map((s) => s.name)].some((v) => v.toLowerCase().includes(q)),
     );
   }, [items, query]);
-  const { rows, ...pager } = usePagination(filtered);
+  const { sorted, sort, toggle } = useSort(filtered, {
+    name: { value: (w) => w.name },
+    kind: { value: (w) => w.kind_label },
+    version: { value: (w) => w.latest_version, desc: true },
+    published: { value: (w) => w.last_published_at, desc: true },
+  });
+  const { rows, ...pager } = usePagination(sorted);
 
   return (
     <div className="page">
@@ -111,11 +118,11 @@ export function ApprovalWorkflowsPage({ token, onSessionEnded }: Props) {
             </colgroup>
             <thead>
               <tr>
-                <th scope="col">Workflow</th>
-                <th scope="col">For</th>
+                <SortHeader label="Workflow" sortKey="name" sort={sort} onSort={toggle} />
+                <SortHeader label="For" sortKey="kind" sort={sort} onSort={toggle} />
                 <th scope="col">Steps</th>
-                <th scope="col">Version</th>
-                <th scope="col">Last published</th>
+                <SortHeader label="Version" sortKey="version" sort={sort} onSort={toggle} />
+                <SortHeader label="Last published" sortKey="published" sort={sort} onSort={toggle} />
                 <th scope="col">
                   <span className="visually-hidden">Actions</span>
                 </th>

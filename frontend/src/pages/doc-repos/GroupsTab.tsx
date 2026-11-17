@@ -12,6 +12,7 @@ import { ApiError } from "../../api/http";
 import { EditIcon, PlusIcon, TrashIcon } from "../../components/Icons";
 import { MessageBar } from "../../components/MessageBar";
 import { Modal } from "../../components/Modal";
+import { SortHeader, useSort } from "../../components/Sort";
 import { Pager, usePagination } from "../../components/Pager";
 import { timeAgo } from "../../lib/time";
 import { ConfirmDelete, ErrorMessage, Notice, useErrors } from "../admin/common";
@@ -36,7 +37,11 @@ export function GroupsTab({ token, docRepo, onSessionEnded }: Props) {
   }, [token, docRepo.id, fail]);
   useEffect(load, [load]);
 
-  const { rows, ...pager } = usePagination(data?.groups ?? []);
+  const { sorted, sort, toggle } = useSort(data?.groups ?? [], {
+    name: { value: (g) => g.name },
+    updated: { value: (g) => g.updated_at, desc: true },
+  });
+  const { rows, ...pager } = usePagination(sorted);
 
   return (
     <section className="panel" aria-labelledby="groups-title">
@@ -66,8 +71,8 @@ export function GroupsTab({ token, docRepo, onSessionEnded }: Props) {
             </colgroup>
             <thead>
               <tr>
-                <th scope="col">User group</th>
-                <th scope="col">Last updated</th>
+                <SortHeader label="User group" sortKey="name" sort={sort} onSort={toggle} />
+                <SortHeader label="Last updated" sortKey="updated" sort={sort} onSort={toggle} />
                 <th scope="col">
                   <span className="visually-hidden">Actions</span>
                 </th>

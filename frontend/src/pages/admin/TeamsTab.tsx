@@ -12,6 +12,7 @@ import {
 import { ApiError } from "../../api/http";
 import { CloseIcon, EditIcon } from "../../components/Icons";
 import { Modal } from "../../components/Modal";
+import { SortHeader, useSort } from "../../components/Sort";
 import { MessageBar } from "../../components/MessageBar";
 import type { AdminTabProps } from "../AdminPage";
 import { ErrorMessage, Notice, useErrors } from "./common";
@@ -42,6 +43,10 @@ export function TeamsTab({ token, onSessionEnded }: AdminTabProps) {
   useEffect(load, [load]);
 
   const rolesOf = (code: string) => grants.filter((g) => g.team === code);
+  const { sorted: sortedTeams, sort, toggle } = useSort(teams ?? [], {
+    name: { value: (t) => t.name },
+    members: { value: (t) => t.members.length, desc: true },
+  });
 
   return (
     <section className="panel" aria-labelledby="teams-title">
@@ -73,8 +78,8 @@ export function TeamsTab({ token, onSessionEnded }: AdminTabProps) {
           </colgroup>
           <thead>
             <tr>
-              <th scope="col">Team</th>
-              <th scope="col">Members</th>
+              <SortHeader label="Team" sortKey="name" sort={sort} onSort={toggle} />
+              <SortHeader label="Members" sortKey="members" sort={sort} onSort={toggle} />
               <th scope="col">Access on every repository</th>
               <th scope="col">
                 <span className="visually-hidden">Actions</span>
@@ -82,7 +87,7 @@ export function TeamsTab({ token, onSessionEnded }: AdminTabProps) {
             </tr>
           </thead>
           <tbody>
-            {teams.map((t) => (
+            {sortedTeams.map((t) => (
               <tr key={t.code}>
                 <td>{t.name}</td>
                 <td>
