@@ -303,3 +303,40 @@ def test_viewers_see_only_the_approved_versions_approval_history(client, hub):
     history = lambda who: client.get(url(hub, doc_id, "/history"), headers=hub[who]).json()
     assert [h["status"] for h in history("marcus")] == ["PENDING", "APPROVED"]
     assert [h["status"] for h in history("eve")] == ["APPROVED"]
+
+
+# --------------------------------------------------------------------------- Published / In progress
+
+
+def view(client, hub, which, who="marcus"):
+    r = client.get(f"/api/doc-repos/{hub['repo']}/documents", params={"view": which}, headers=hub[who])
+    assert r.status_code == 200, r.text
+    return {d["filename"]: (d["version"], d["status"]) for d in r.json()}
+
+
+def test_published_lists_approved_versions_and_in_progress_the_rest(client, hub):
+    doc_id = approved_v1(client, hub)
+    upload(client, hub, V2)  # policy.pdf v2: a draft
+    upload(client, hub, V3, name="new.pdf")  # never approved
+    assert view(client, hub, "published") == {"policy.pdf": (1, "approved")}
+    assert view(client, hub, "in_progress") == {"policy.pdf": (2, "draft"), "new.pdf": (1, "draft")}
+    assert view(client, hub, "published", "eve") == {"policy.pdf": (1, "approved")}
+    assert view(client, hub, "in_progress", "eve") == {}
+    submit(client, hub, doc_id)
+    assert view(client, hub, "in_progress", "cara") == {"policy.pdf": (2, "pending_approval")}  # no drafts
+
+
+def test_the_published_version_opens_and_downloads_on_request(client, hub):
+    doc_id = approved_v1(client, hub)
+    upload(client, hub, V2)
+    d = client.get(url(hub, doc_id), params={"published": True}, headers=hub["marcus"]).json()
+    assert (d["version"], d["latest"], d["actions"]["edit"]) == (1, False, False)
+    assert client.get(url(hub, doc_id, "/download"), params={"published": True}, headers=hub["marcus"]).content == V1
+    [draft] = upload(client, hub, V3, name="new.pdf").json()
+    r = client.get(url(hub, draft["id"]), params={"published": True}, headers=hub["marcus"])
+    assert r.status_code == 404 and "no approved version" in r.json()["detail"]
+
+
+def test_an_unknown_view_is_refused(client, hub):
+    r = client.get(f"/api/doc-repos/{hub['repo']}/documents", params={"view": "mine"}, headers=hub["marcus"])
+    assert r.status_code == 422

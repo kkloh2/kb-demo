@@ -5,7 +5,7 @@ import { ApproveIcon, EyeIcon, FileIcon, RejectIcon, RequestChangesIcon, SearchI
 import { Modal } from "../../components/Modal";
 import { Pager, usePagination } from "../../components/Pager";
 import { timeAgo } from "../../lib/time";
-import { extKind } from "../doc-repos/DocumentsTab";
+import { extKind } from "../doc-repos/docs-common";
 import { ApprovalPanel } from "./ApprovalPanel";
 import "../../styles/knowledge-bases.css";
 import "../../styles/admin.css"; // modal and form styles

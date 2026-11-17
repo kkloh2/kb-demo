@@ -69,13 +69,24 @@ def _query(repo_id: uuid.UUID):
             .options(selectinload(Document.maker)))
 
 
-def list_documents(db: Session, user: AppUser, repo_id: uuid.UUID) -> tuple[DocRepo, list[versions.View], RepoAccess]:
-    """The documents the person may see, each as the version they see (versions.views)."""
+VIEWS = ("all", "published", "in_progress")
+
+
+def list_documents(db: Session, user: AppUser, repo_id: uuid.UUID,
+                   view: str = "all") -> tuple[DocRepo, list[versions.View], RepoAccess]:
+    """The documents the person may see, each as the version they see. `view`: "all" (each
+    document's visible version, see versions.views), "published" (latest approved versions) or
+    "in_progress" (latest versions that aren't approved)."""
+    if view not in VIEWS:
+        raise InvalidRequest("view is all, published or in_progress.")
     repo = get_repo(db, repo_id)
     a = access_to(db, user, repo)
-    docs = db.scalars(_query(repo_id).where(versions.visible_filter(a))
-                      .order_by(Document.folder, Document.filename)).all()
-    return repo, versions.views(db, list(docs), a), a
+    cond = {"all": versions.visible_filter(a), "published": versions.published_filter(),
+            "in_progress": versions.in_progress_filter(a)}[view]
+    docs = list(db.scalars(_query(repo_id).where(cond).order_by(Document.folder, Document.filename)))
+    seen = (versions.published_views(db, docs, a) if view == "published"
+            else versions.in_progress_views(docs, a) if view == "in_progress" else versions.views(db, docs, a))
+    return repo, seen, a
 
 
 def get_document(db: Session, user: AppUser, repo_id: uuid.UUID, document_id: uuid.UUID) -> tuple[DocRepo, Document, RepoAccess]:
@@ -84,13 +95,16 @@ def get_document(db: Session, user: AppUser, repo_id: uuid.UUID, document_id: uu
     return repo, view.doc, a
 
 
-def get_view(db: Session, user: AppUser, repo_id: uuid.UUID, document_id: uuid.UUID) -> tuple[DocRepo, versions.View, RepoAccess]:
+def get_view(db: Session, user: AppUser, repo_id: uuid.UUID, document_id: uuid.UUID,
+             published: bool = False) -> tuple[DocRepo, versions.View, RepoAccess]:
+    """The document as the person sees it; `published`: its latest approved version (404 if none)."""
     repo = get_repo(db, repo_id)
     a = access_to(db, user, repo)
     doc = db.scalar(_query(repo_id).where(Document.id == document_id))
-    seen = versions.views(db, [doc], a) if doc is not None else []
+    seen = [] if doc is None else versions.published_views(db, [doc], a) if published else versions.views(db, [doc], a)
     if not seen:
-        raise NotFound("No such document in this repository.")
+        raise NotFound("No such document in this repository." if not published or doc is None
+                       else f"{doc.filename} has no approved version yet.")
     return repo, seen[0], a
 
 

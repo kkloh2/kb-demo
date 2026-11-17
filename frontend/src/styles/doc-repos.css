@@ -562,3 +562,82 @@
   margin-top: var(--sp-1);
   font-size: var(--fs-sm);
 }
+
+/* ---------- Documents tab: Published / In progress ---------- */
+.docs-views {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-5);
+}
+
+/* Same look as the list/grid view toggle (.view-toggle); counts as in tab labels: "Published (2)". */
+.segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+}
+
+.segmented__item {
+  height: 32px;
+  padding: 0 var(--sp-4);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.segmented__item:hover {
+  background: var(--gray-100);
+  color: var(--text-primary);
+}
+
+.segmented__item[aria-selected="true"],
+.segmented__item[aria-selected="true"]:hover {
+  background: var(--brand-red-050);
+  color: var(--brand-red-600);
+}
+
+.segmented__item:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.toolbar--wrap .toolbar__left {
+  flex-wrap: wrap;
+}
+
+.filter-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: calc(var(--sp-4) * -1) 0 var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.upload-dialog .form-grid {
+  margin-bottom: var(--sp-5);
+}
+
+.upload-dialog__pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.upload-dialog__summary {
+  margin: var(--sp-4) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}

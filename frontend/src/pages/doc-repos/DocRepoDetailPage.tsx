@@ -30,7 +30,6 @@ export function DocRepoDetailPage({ token, docRepoId, onBack, onSessionEnded }: 
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("documents");
   const [notice, setNotice] = useState<string | null>(null);
-  const [docCount, setDocCount] = useState<number | null>(null);
 
   const load = useCallback(() => {
     getDocRepo(token, docRepoId)
@@ -66,7 +65,7 @@ export function DocRepoDetailPage({ token, docRepoId, onBack, onSessionEnded }: 
 
   const { access } = docRepo;
   const tabs: { key: Tab; label: string }[] = [
-    { key: "documents", label: docCount === null ? "Documents" : `Documents (${docCount})` },
+    { key: "documents", label: "Documents" }, // counts are on its Published / In progress switch
     { key: "metadata", label: "Metadata" },
     ...(access.manage_members
       ? [{ key: "members" as Tab, label: "Users" }, { key: "groups" as Tab, label: "User groups" }]
@@ -107,7 +106,7 @@ export function DocRepoDetailPage({ token, docRepoId, onBack, onSessionEnded }: 
 
       <div role="tabpanel" id={`docRepo-panel-${tab}`} aria-labelledby={`docRepo-tab-${tab}`}>
         {tab === "documents" && (
-          <DocumentsTab token={token} docRepo={docRepo} onSessionEnded={onSessionEnded} onCountChange={setDocCount} />
+          <DocumentsTab token={token} docRepo={docRepo} onSessionEnded={onSessionEnded} />
         )}
         {tab === "metadata" && (
           <RepositoryMetadataPanel token={token} docRepoId={docRepo.id} pairs={docRepo.metadata} canEdit={access.edit}

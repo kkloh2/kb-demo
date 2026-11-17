@@ -181,24 +181,68 @@ def visible_filter(a: RepoAccess):
     return cond
 
 
+def _head_view(d: Document) -> View:
+    return View(d, d.version, True, d.filename, d.content_type, d.size_bytes, d.storage_path, d.status,
+                d.maker_id, d.latest_approval_request_id, d.submitted_at, d.updated_at, None)
+
+
+def _version_view(d: Document, v: DocumentVersion) -> View:
+    return View(d, v.number, False, v.filename, v.content_type, v.size_bytes, v.storage_path, v.status,
+                v.uploaded_by_id, v.approval_request_id, v.submitted_at, v.updated_at, v.metadata_snapshot or [])
+
+
+def _approved_rows(db: Session, docs: list[Document]) -> dict[tuple[uuid.UUID, int], DocumentVersion]:
+    """The approved version's row of each document whose approved version isn't its latest."""
+    older = [d for d in docs if d.approved_version and d.approved_version != d.version]
+    if not older:
+        return {}
+    return {(v.document_id, v.number): v for v in db.scalars(select(DocumentVersion).where(
+        DocumentVersion.document_id.in_([d.id for d in older])))}
+
+
 def views(db: Session, docs: list[Document], a: RepoAccess) -> list[View]:
     """What the person sees of each document (documents they can't see are left out)."""
     statuses = a.visible_statuses()
-    older = [d for d in docs if d.status not in statuses and d.approved_version and S.APPROVED.value in statuses]
-    approved = {}
-    if older:
-        approved = {(v.document_id, v.number): v for v in db.scalars(select(DocumentVersion).where(
-            DocumentVersion.document_id.in_([d.id for d in older])))}
+    approved = _approved_rows(db, [d for d in docs if d.status not in statuses]) if S.APPROVED.value in statuses else {}
     out = []
     for d in docs:
         if d.status in statuses:
-            out.append(View(d, d.version, True, d.filename, d.content_type, d.size_bytes, d.storage_path, d.status,
-                            d.maker_id, d.latest_approval_request_id, d.submitted_at, d.updated_at, None))
+            out.append(_head_view(d))
         elif (v := approved.get((d.id, d.approved_version))) is not None:
-            out.append(View(d, v.number, False, v.filename, v.content_type, v.size_bytes, v.storage_path, v.status,
-                            v.uploaded_by_id, v.approval_request_id, v.submitted_at, v.updated_at,
-                            v.metadata_snapshot or []))
+            out.append(_version_view(d, v))
     return out
+
+
+# The Documents tab's two lists. Published: every document's latest approved version, for anyone
+# who may see approved documents. In progress: the latest version of documents that aren't approved
+# (drafts, pending, changes requested, rejected), for those who may see them.
+
+def published_filter():
+    return Document.approved_version.is_not(None)
+
+
+def published_views(db: Session, docs: list[Document], a: RepoAccess) -> list[View]:
+    if S.APPROVED.value not in a.visible_statuses():
+        return []
+    approved = _approved_rows(db, docs)
+    out = []
+    for d in docs:
+        if not d.approved_version:
+            continue
+        if d.approved_version == d.version:
+            out.append(_head_view(d))
+        elif (v := approved.get((d.id, d.approved_version))) is not None:
+            out.append(_version_view(d, v))
+    return out
+
+
+def in_progress_filter(a: RepoAccess):
+    return Document.status.in_(a.visible_statuses() - {S.APPROVED.value})
+
+
+def in_progress_views(docs: list[Document], a: RepoAccess) -> list[View]:
+    statuses = a.visible_statuses() - {S.APPROVED.value}
+    return [_head_view(d) for d in docs if d.status in statuses]
 
 
 def list_versions(db: Session, doc: Document) -> list[DocumentVersion]:

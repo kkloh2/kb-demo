@@ -25,6 +25,7 @@ interface Props {
   token: string;
   docRepoId: string;
   documentId: string;
+  published?: boolean; // show its latest approved version (opened from the Published list)
   onClose: () => void;
   onChanged: (message?: string) => void;
   onSessionEnded: (message: string) => void;
@@ -45,7 +46,7 @@ const DECISION_STATUS: Record<"APPROVED" | "REJECTED" | "CHANGES_REQUESTED", Doc
  * submit, discard the latest version or restore an earlier one; the decision happens on the
  * Approvals page.
  */
-export function DocumentPanel({ token, docRepoId, documentId, onClose, onChanged, onSessionEnded }: Props) {
+export function DocumentPanel({ token, docRepoId, documentId, published = false, onClose, onChanged, onSessionEnded }: Props) {
   const [doc, setDoc] = useState<DocRepoDocument | null>(null);
   const [fields, setFields] = useState<Record<string, FieldState>>({});
   const [own, setOwn] = useState<{ label: string; value: string }[]>([]);
@@ -90,13 +91,13 @@ export function DocumentPanel({ token, docRepoId, documentId, onClose, onChanged
   );
 
   useEffect(() => {
-    getDocument(token, docRepoId, documentId)
+    getDocument(token, docRepoId, documentId, published)
       .then((d) => {
         show(d);
         loadHistory(d);
       })
       .catch(fail);
-  }, [token, docRepoId, documentId, show, loadHistory, fail]);
+  }, [token, docRepoId, documentId, published, show, loadHistory, fail]);
 
   if (!doc) {
     return <div className="modal__body">{error ? <MessageBar className="alert" role="alert" onClose={onClose}>{error}</MessageBar> : <p className="muted">Loading…</p>}</div>;
@@ -196,7 +197,7 @@ export function DocumentPanel({ token, docRepoId, documentId, onClose, onChanged
               </span>
             </p>
           </div>
-          <button type="button" className="btn-secondary btn-sm" onClick={() => downloadDocument(token, doc).catch(fail)}>
+          <button type="button" className="btn-secondary btn-sm" onClick={() => downloadDocument(token, doc, published && !doc.latest).catch(fail)}>
             <DownloadIcon />
             Download
           </button>

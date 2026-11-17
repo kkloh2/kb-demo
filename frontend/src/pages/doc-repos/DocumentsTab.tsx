@@ -1,73 +1,54 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   deleteDocuments,
   downloadDocument,
-  formatSize,
   listDocuments,
-  STATUS_LABEL,
   submitDocuments,
-  uploadDocuments,
-  type BulkResult,
-  type DocumentStatus,
   type DocRepoDocument,
+  type DocumentStatus,
 } from "../../api/documents";
 import { ApiError } from "../../api/http";
 import type { DocRepo } from "../../api/doc-repos";
-import {
-  ChevronIcon,
-  DownloadIcon,
-  FileIcon,
-  FolderIcon,
-  MoreIcon,
-  PlusIcon,
-  SearchIcon,
-  TrashIcon,
-  UploadIcon,
-} from "../../components/Icons";
-import { Menu, type MenuItem } from "../../components/Menu";
-import { Modal } from "../../components/Modal";
-import { Pager, usePagination } from "../../components/Pager";
-import { timeAgo } from "../../lib/time";
-import { DocumentPanel } from "./DocumentPanel";
+import { FileIcon, PlusIcon, UploadIcon } from "../../components/Icons";
 import { MessageBar } from "../../components/MessageBar";
-import { SelectAll } from "../../components/SelectAll";
-import { SortHeader, useSort } from "../../components/Sort";
+import { Modal } from "../../components/Modal";
+import { DocumentPanel } from "./DocumentPanel";
+import { InProgressList } from "./InProgressList";
+import { PublishedList } from "./PublishedList";
+import { UploadDialog } from "./UploadDialog";
+import { allFolders, extKind, plural } from "./docs-common";
 
-// Must match the server's allowed_upload_extensions; anything else in a folder is left out.
-const ALLOWED = [".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".csv", ".txt", ".md"];
-
-type StatusFilter = "all" | DocumentStatus;
-
-/** Documents a maker can tick for bulk submission: drafts and those sent back for changes. */
-const BULK_STATUSES: DocumentStatus[] = ["draft", "changes_requested"];
-const bulkable = (d: DocRepoDocument) => d.actions.submit && BULK_STATUSES.includes(d.status);
+type View = "published" | "in_progress";
 type Notice = { kind: "ok" | "error"; text: string } | null;
 
 interface Props {
   token: string;
   docRepo: DocRepo;
   onSessionEnded: (message: string) => void;
-  onCountChange?: (count: number) => void;
 }
 
-/** The repository's documents, browsable by folder, with upload, submit / delete per document, and
- * bulk submission of ticked drafts and changes-requested documents (all or none). Decisions happen on
- * the Approvals page. */
-export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: Props) {
+/**
+ * The repository's documents in two lists. Published: the approved version of each document, to
+ * browse by folder and find by metadata (all that viewers see). In progress: what isn't approved yet
+ * (drafts, waiting, changes requested, rejected), for makers, checkers and auditors, where makers
+ * submit in bulk. Add uploads into a chosen folder; decisions happen on the Approvals page.
+ */
+export function DocumentsTab({ token, docRepo, onSessionEnded }: Props) {
   const { access } = docRepo;
-  const [docs, setDocs] = useState<DocRepoDocument[] | null>(null);
+  const canUpload = access.upload;
+  const seesProgress = canUpload || access.roles.includes("CHECKER") || access.roles.includes("AUDITOR");
+  const [view, setView] = useState<View>("published");
+  const [published, setPublished] = useState<DocRepoDocument[] | null>(null);
+  const [inProgress, setInProgress] = useState<DocRepoDocument[] | null>(seesProgress ? null : []);
   const [folder, setFolder] = useState("");
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<StatusFilter>("all");
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<string[] | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
+  const [open, setOpen] = useState<{ id: string; published: boolean } | null>(null);
+  const [uploading, setUploading] = useState<{ target: DocRepoDocument | null } | null>(null);
+  const [deleting, setDeleting] = useState<DocRepoDocument | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
   // Ticked documents, with the status each had when ticked: the server refuses the batch if any changed.
   const [selected, setSelected] = useState<Map<string, DocumentStatus>>(new Map());
-  const [confirming, setConfirming] = useState(false);
-  const filesInput = useRef<HTMLInputElement>(null);
-  const folderInput = useRef<HTMLInputElement>(null);
 
   const fail = useCallback(
     (e: unknown) => {
@@ -78,98 +59,34 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
   );
 
   const load = useCallback(() => {
-    listDocuments(token, docRepo.id)
-      .then((r) => {
-        setDocs(r);
-        onCountChange?.(r.length);
-        // keep only ticks that still apply to what's there now
-        const now = new Map(r.map((d) => [d.id, d]));
+    Promise.all([
+      listDocuments(token, docRepo.id, "published"),
+      seesProgress ? listDocuments(token, docRepo.id, "in_progress") : Promise.resolve([]),
+    ])
+      .then(([pub, wip]) => {
+        setPublished(pub);
+        setInProgress(wip);
+        // keep only ticks that still apply
+        const now = new Map(wip.map((d) => [d.id, d]));
         setSelected((sel) => {
-          const kept = new Map([...sel].filter(([id, st]) => {
-            const d = now.get(id);
-            return d !== undefined && d.status === st && bulkable(d);
-          }));
+          const kept = new Map([...sel].filter(([id, st]) => now.get(id)?.status === st));
           return kept.size === sel.size ? sel : kept;
         });
       })
       .catch(fail);
-  }, [token, docRepo.id, fail, onCountChange]);
+  }, [token, docRepo.id, seesProgress, fail]);
   useEffect(load, [load]);
 
-  // Folder pickers need the non-standard webkitdirectory attribute.
-  useEffect(() => {
-    folderInput.current?.setAttribute("webkitdirectory", "");
-  }, []);
+  const folders = useMemo(() => allFolders([...(published ?? []), ...(inProgress ?? [])]), [published, inProgress]);
+  const workingOn = useMemo(() => new Set((inProgress ?? []).map((d) => d.id)), [inProgress]);
+  const chosen = useMemo(() => (inProgress ?? []).filter((d) => selected.has(d.id)), [inProgress, selected]);
 
-  // ---------------------------------------------------------------- what to show
-  const searching = query.trim() !== "" || status !== "all";
-  const matches = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return (docs ?? []).filter(
-      (d) =>
-        (status === "all" || d.status === status) &&
-        (!q ||
-          d.filename.toLowerCase().includes(q) ||
-          d.folder.toLowerCase().includes(q) ||
-          d.metadata.some((m) => (m.value ?? "").toLowerCase().includes(q))),
-    );
-  }, [docs, query, status]);
-
-  const { subfolders, files } = useMemo(() => {
-    if (searching) return { subfolders: [] as { name: string; count: number }[], files: matches };
-    const prefix = folder ? `${folder}/` : "";
-    const counts = new Map<string, number>();
-    for (const d of docs ?? []) {
-      if (folder && d.folder !== folder && !d.folder.startsWith(prefix)) continue;
-      const rest = folder ? d.folder.slice(prefix.length) : d.folder;
-      if (d.folder === folder || !rest) continue;
-      const name = rest.split("/")[0];
-      counts.set(name, (counts.get(name) ?? 0) + 1);
-    }
-    return {
-      subfolders: [...counts.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, count]) => ({ name, count })),
-      files: (docs ?? []).filter((d) => d.folder === folder),
-    };
-  }, [docs, folder, matches, searching]);
-
-  const { sorted, sort, toggle: sortBy } = useSort(files, {
-    name: { value: (d) => d.filename },
-    status: { value: (d) => STATUS_LABEL[d.status] },
-    maker: { value: (d) => d.maker?.display_name },
-    updated: { value: (d) => d.updated_at, desc: true },
-  });
-  const { rows, ...pager } = usePagination(sorted);
-
-  // A different folder, search or filter starts a new selection; "select all" covers what it shows.
-  useEffect(() => setSelected(new Map()), [folder, query, status]);
-  const showChecks = access.upload;
-  const tickable = useMemo(() => files.filter(bulkable), [files]);
-  const tickedHere = tickable.filter((d) => selected.has(d.id)).length;
-  const chosen = useMemo(() => (docs ?? []).filter((d) => selected.has(d.id)), [docs, selected]);
-
-  function toggle(d: DocRepoDocument) {
-    setSelected((sel) => {
-      const next = new Map(sel);
-      if (next.has(d.id)) next.delete(d.id);
-      else next.set(d.id, d.status);
-      return next;
-    });
-  }
-
-  function toggleAll(all: boolean) {
-    setSelected(all ? new Map(tickable.map((d) => [d.id, d.status])) : new Map());
-  }
-
-  async function submitSelected() {
-    const statuses = Object.fromEntries(selected);
-    const n = selected.size;
-    setConfirming(false);
-    setBusy("bulk-submit");
+  // ---------------------------------------------------------------- actions
+  async function run(label: string, work: () => Promise<string>) {
+    setBusy(label);
     setNotice(null);
     try {
-      await submitDocuments(token, docRepo.id, statuses);
-      setNotice({ kind: "ok", text: `Submitted ${n} document${n === 1 ? "" : "s"} for approval.` });
-      setSelected(new Map());
+      setNotice({ kind: "ok", text: await work() });
     } catch (e) {
       fail(e);
       if (e instanceof ApiError && e.status === 409) setSelected(new Map());
@@ -179,145 +96,83 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
     }
   }
 
-  // ---------------------------------------------------------------- actions
-  function report(verb: string, r: BulkResult) {
-    const parts = [`${verb} ${r.done.length} document${r.done.length === 1 ? "" : "s"}.`];
-    if (r.skipped.length)
-      parts.push(`Skipped ${r.skipped.length}: ${r.skipped.map((s) => `${s.filename} (${s.reason})`).join("; ")}`);
-    setNotice({ kind: r.skipped.length && !r.done.length ? "error" : "ok", text: parts.join(" ") });
-  }
-
-  async function run(label: string, action: () => Promise<BulkResult>, verb: string) {
-    setBusy(label);
-    setNotice(null);
-    try {
-      report(verb, await action());
-      load();
-    } catch (e) {
-      fail(e);
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function onPicked(list: FileList | null, fromFolder: boolean) {
-    if (!list?.length) return;
-    const prefix = folder ? `${folder}/` : "";
-    const all = [...list].map((file) => ({
-      file,
-      path: prefix + (fromFolder && file.webkitRelativePath ? file.webkitRelativePath : file.name),
-    }));
-    const usable = all.filter(({ file }) => {
-      const ext = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".")).toLowerCase() : "";
-      return !file.name.startsWith(".") && ALLOWED.includes(ext) && file.size > 0;
+  const submitSelected = () => {
+    const statuses = Object.fromEntries(selected);
+    const n = selected.size;
+    setConfirming(false);
+    run("bulk-submit", async () => {
+      await submitDocuments(token, docRepo.id, statuses);
+      setSelected(new Map());
+      return `Submitted ${plural(n, "document", "documents")} for approval.`;
     });
-    const left = all.length - usable.length;
-    if (filesInput.current) filesInput.current.value = "";
-    if (folderInput.current) folderInput.current.value = "";
-    if (!usable.length) {
-      setNotice({ kind: "error", text: `None of the ${all.length} files can be uploaded (allowed: ${ALLOWED.join(", ")}).` });
-      return;
-    }
-    setBusy(`Uploading ${usable.length}…`);
-    setNotice(null);
-    try {
-      const uploaded = await uploadDocuments(token, docRepo.id, usable);
-      const count = (o: string) => uploaded.filter((d) => d.outcome === o).length;
-      const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-      const parts = [
-        count("new") && plural(count("new"), "new document", "new documents"),
-        count("version") && plural(count("version"), "new version of an existing document", "new versions of existing documents"),
-        count("replaced") && plural(count("replaced"), "replaced draft", "replaced drafts"),
-      ].filter(Boolean);
-      setNotice({
-        kind: "ok",
-        text:
-          `Uploaded ${plural(uploaded.length, "file", "files")}: ${parts.join(", ")}. ` +
-          (left ? `Left out ${left} (hidden, empty or not an allowed type). ` : "") +
-          "Open each to check its metadata, then submit it for approval.",
-      });
-      load();
-    } catch (e) {
-      fail(e);
-    } finally {
-      setBusy(null);
-    }
+  };
+
+  function uploaded(docs: DocRepoDocument[], leftOut: number) {
+    setUploading(null);
+    const count = (o: string) => docs.filter((d) => d.outcome === o).length;
+    const parts = [
+      count("new") && plural(count("new"), "new document", "new documents"),
+      count("version") && plural(count("version"), "new version", "new versions"),
+      count("replaced") && plural(count("replaced"), "replaced draft", "replaced drafts"),
+    ].filter(Boolean);
+    setNotice({
+      kind: "ok",
+      text:
+        `Uploaded ${plural(docs.length, "file", "files")}: ${parts.join(", ")}. ` +
+        (leftOut ? `Left out ${leftOut} (hidden, empty or not an allowed type). ` : "") +
+        "They're in progress: check each one's metadata, then submit it for approval.",
+    });
+    setView("in_progress");
+    load();
   }
 
-  const rowMenu = (d: DocRepoDocument): MenuItem[] => [
-    { label: "Open", icon: <FileIcon />, onSelect: () => setOpenId(d.id) },
-    { label: "Download", icon: <DownloadIcon />, onSelect: () => downloadDocument(token, d).catch(fail) },
-    ...(d.actions.submit
-      ? [{ label: "Submit for approval", icon: <UploadIcon />, onSelect: () => run("submit", () => submitDocuments(token, docRepo.id, { [d.id]: d.status }), "Submitted") }]
-      : []),
-    ...(d.actions.delete ? [{ label: "Delete…", icon: <TrashIcon />, danger: true, onSelect: () => setDeleting([d.id]) }] : []),
-  ];
-
-  // ---------------------------------------------------------------- render
-  const crumbs = folder ? folder.split("/") : [];
-  const statusOptions: StatusFilter[] = access.upload || access.roles.includes("AUDITOR")
-    ? ["all", "draft", "pending_approval", "changes_requested", "approved", "rejected"]
-    : access.roles.includes("CHECKER")
-      ? ["all", "pending_approval", "changes_requested", "approved", "rejected"]
-      : [];
+  const showView = seesProgress ? view : "published";
 
   return (
     <div>
-      <div className="toolbar">
-        <div className="toolbar__left">
-          <label className="search">
-            <SearchIcon />
-            <input type="search" placeholder="Search documents" value={query}
-              onChange={(e) => setQuery(e.target.value)} aria-label="Search documents" />
-          </label>
-          {statusOptions.length > 0 && (
-            <label className="filter">
-              <span className="sr-only">Status</span>
-              <select value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)}>
-                {statusOptions.map((s) => (
-                  <option key={s} value={s}>
-                    {s === "all" ? "All statuses" : STATUS_LABEL[s]}
-                  </option>
-                ))}
-              </select>
-              <ChevronIcon dir="down" />
-            </label>
-          )}
-        </div>
+      <div className="docs-views">
+        {seesProgress ? (
+          <div className="segmented" role="tablist" aria-label="Documents">
+            {(["published", "in_progress"] as View[]).map((v) => {
+              const n = (v === "published" ? published : inProgress)?.length;
+              return (
+                <button key={v} type="button" role="tab" aria-selected={showView === v} className="segmented__item"
+                  onClick={() => setView(v)}>
+                  {v === "published" ? "Published" : "In progress"}
+                  {n !== undefined && ` (${n})`}
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <span />
+        )}
 
-        {access.upload && (
+        {canUpload && (
           <div className="toolbar__right bulk-actions">
-            {selected.size > 0 && (
-              <span className="selection-count" aria-live="polite">
-                <strong>{selected.size} selected</strong>
-                <button type="button" className="btn-link" onClick={() => setSelected(new Map())}>
-                  Clear
+            {showView === "in_progress" && (
+              <>
+                {selected.size > 0 && (
+                  <span className="selection-count" aria-live="polite">
+                    <strong>{selected.size} selected</strong>
+                    <button type="button" className="btn-link" onClick={() => setSelected(new Map())}>
+                      Clear
+                    </button>
+                  </span>
+                )}
+                <button type="button" className="btn-primary" disabled={selected.size === 0 || busy !== null}
+                  title={selected.size === 0 ? "Tick drafts or documents sent back for changes to submit them together" : undefined}
+                  onClick={() => setConfirming(true)}>
+                  <UploadIcon />
+                  {busy === "bulk-submit" ? "Submitting…" : "Submit for approval"}
                 </button>
-              </span>
+              </>
             )}
-            <button type="button" className="btn-primary" disabled={selected.size === 0 || busy !== null}
-              title={selected.size === 0 ? "Tick drafts or documents sent back for changes to submit them together" : undefined}
-              onClick={() => setConfirming(true)}>
-              <UploadIcon />
-              {busy === "bulk-submit" ? "Submitting…" : "Submit for approval"}
+            <button type="button" className="btn-outline" disabled={busy !== null}
+              onClick={() => setUploading({ target: null })}>
+              <PlusIcon />
+              Add
             </button>
-            <Menu
-              trigger={(props) => (
-                <button type="button" className="btn-outline" disabled={busy !== null} {...props}>
-                  <PlusIcon />
-                  {busy?.startsWith("Uploading") ? busy : "Add"}
-                  <ChevronIcon dir="down" />
-                </button>
-              )}
-              items={[
-                { label: "Upload files", icon: <UploadIcon />, onSelect: () => filesInput.current?.click() },
-                { label: "Upload folder", icon: <FolderIcon />, onSelect: () => folderInput.current?.click() },
-              ]}
-            />
-            <input ref={filesInput} type="file" multiple accept={ALLOWED.join(",")} hidden
-              onChange={(e) => onPicked(e.target.files, false)} data-testid="upload-files" />
-            <input ref={folderInput} type="file" multiple hidden
-              onChange={(e) => onPicked(e.target.files, true)} data-testid="upload-folder" />
           </div>
         )}
       </div>
@@ -328,149 +183,66 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
         </MessageBar>
       )}
 
-      {!searching && (
-        <nav className="crumbs" aria-label="Folder">
-          <button type="button" className="crumbs__item" aria-current={folder === "" ? "page" : undefined}
-            onClick={() => setFolder("")}>
-            All files
-          </button>
-          {crumbs.map((c, i) => {
-            const path = crumbs.slice(0, i + 1).join("/");
-            return (
-              <span key={path} className="crumbs__part">
-                <ChevronIcon dir="right" />
-                <button type="button" className="crumbs__item" aria-current={path === folder ? "page" : undefined}
-                  onClick={() => setFolder(path)}>
-                  {c}
-                </button>
-              </span>
-            );
-          })}
-        </nav>
+      {showView === "published" ? (
+        <PublishedList
+          docs={published}
+          inProgress={canUpload ? workingOn : new Set()}
+          canUpload={canUpload}
+          folder={folder}
+          onFolder={setFolder}
+          onOpen={(d) => setOpen({ id: d.id, published: true })}
+          onDownload={(d) => downloadDocument(token, d, true).catch(fail)}
+          onNewVersion={(d) => setUploading({ target: d })}
+        />
+      ) : (
+        <InProgressList
+          docs={inProgress}
+          canUpload={canUpload}
+          selected={selected}
+          onSelected={setSelected}
+          onOpen={(d) => setOpen({ id: d.id, published: false })}
+          onDownload={(d) => downloadDocument(token, d).catch(fail)}
+          onSubmit={(d) =>
+            run("submit", async () => {
+              await submitDocuments(token, docRepo.id, { [d.id]: d.status });
+              return `Submitted ${d.filename} for approval.`;
+            })
+          }
+          onDelete={setDeleting}
+        />
       )}
 
-      <div className="kb-table-panel">
-        {docs === null ? (
-          <p className="kb-message">Loading documents…</p>
-        ) : subfolders.length === 0 && files.length === 0 ? (
-          <p className="kb-message">
-            {searching
-              ? "No documents match."
-              : docs.length === 0
-                ? access.upload
-                  ? "No documents yet. Use Add → Upload files or Upload folder."
-                  : "No documents to show yet."
-                : "This folder is empty."}
-          </p>
-        ) : (
-          <>
-            <table className="data-table docs-table">
-              <colgroup>
-                {showChecks && <col style={{ width: "44px" }} />}
-                <col />
-                <col style={{ width: "150px" }} />
-                <col style={{ width: "18%" }} />
-                <col style={{ width: "120px" }} />
-                <col style={{ width: "56px" }} />
-              </colgroup>
-              <thead>
-                <tr>
-                  {showChecks && (
-                    <th scope="col" className="check-cell">
-                      <SelectAll selected={tickedHere} total={tickable.length} onChange={toggleAll}
-                        label="Select all drafts and documents sent back for changes" />
-                    </th>
-                  )}
-                  <SortHeader label="Name" sortKey="name" sort={sort} onSort={sortBy} />
-                  <SortHeader label="Status" sortKey="status" sort={sort} onSort={sortBy} />
-                  <SortHeader label="Uploaded by" sortKey="maker" sort={sort} onSort={sortBy} />
-                  <SortHeader label="Updated" sortKey="updated" sort={sort} onSort={sortBy} />
-                  <th scope="col">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {subfolders.map((f) => (
-                  <tr key={`folder:${f.name}`} className="docs-table__folder">
-                    {showChecks && <td className="check-cell" />}
-                    <td>
-                      <button type="button" className="doc-name doc-name--button"
-                        onClick={() => setFolder(folder ? `${folder}/${f.name}` : f.name)}>
-                        <span className="doc-name__icon doc-name__icon--folder">
-                          <FolderIcon />
-                        </span>
-                        <span className="truncate">{f.name}</span>
-                      </button>
-                    </td>
-                    <td colSpan={4} />
-                  </tr>
-                ))}
-                {rows.map((d) => (
-                  <tr key={d.id}>
-                    {showChecks && (
-                      <td className="check-cell">
-                        {bulkable(d) && (
-                          <input type="checkbox" className="row-check" aria-label={`Select ${d.filename}`}
-                            checked={selected.has(d.id)} onChange={() => toggle(d)} />
-                        )}
-                      </td>
-                    )}
-                    <td>
-                      <button type="button" className="doc-name doc-name--button" onClick={() => setOpenId(d.id)}
-                        title={`${d.folder ? `${d.folder}/` : ""}${d.filename}`}>
-                        <span className={`doc-name__icon doc-name__icon--${extKind(d.filename)}`}>
-                          <FileIcon />
-                        </span>
-                        <span className="doc-name__text">
-                          <span className="truncate">{d.filename}</span>
-                          <span className="doc-name__sub">
-                            {searching && d.folder ? `${d.folder} · ` : ""}
-                            {`Version ${d.version} · `}
-                            {formatSize(d.size_bytes)}
-                          </span>
-                        </span>
-                      </button>
-                    </td>
-                    <td>
-                      <span className={`status status--${d.status}`} title={d.last_decision?.comment ?? undefined}>
-                        {STATUS_LABEL[d.status]}
-                      </span>
-                    </td>
-                    <td className="truncate">{d.maker?.display_name ?? "—"}</td>
-                    <td title={new Date(d.updated_at).toLocaleString()}>{timeAgo(d.updated_at)}</td>
-                    <td className="kb-table__actions">
-                      <Menu
-                        trigger={(props) => (
-                          <button type="button" className="kb-icon-btn kb-icon-btn--brand"
-                            aria-label={`More actions for ${d.filename}`} title="More actions" {...props}>
-                            <MoreIcon />
-                          </button>
-                        )}
-                        items={rowMenu(d)}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <Pager {...pager} />
-          </>
-        )}
-      </div>
-
-      <Modal open={openId !== null} wide title="Document" onClose={() => setOpenId(null)}>
-        {openId !== null && (
+      <Modal open={open !== null} wide title="Document" onClose={() => setOpen(null)}>
+        {open !== null && (
           <DocumentPanel
             token={token}
             docRepoId={docRepo.id}
-            documentId={openId}
-            onClose={() => setOpenId(null)}
+            documentId={open.id}
+            published={open.published}
+            onClose={() => setOpen(null)}
             onChanged={(message) => {
               if (message) setNotice({ kind: "ok", text: message });
               load();
             }}
             onSessionEnded={onSessionEnded}
+          />
+        )}
+      </Modal>
+
+      <Modal open={uploading !== null} title={uploading?.target ? "Upload new version" : "Upload documents"}
+        onClose={() => setUploading(null)}>
+        {uploading && (
+          <UploadDialog
+            token={token}
+            docRepoId={docRepo.id}
+            folders={folders}
+            initialFolder={folder}
+            target={uploading.target}
+            onCancel={() => setUploading(null)}
+            onUploaded={uploaded}
+            onError={(e) => {
+              if (e instanceof ApiError && e.status === 401) onSessionEnded(e.message);
+            }}
           />
         )}
       </Modal>
@@ -500,6 +272,7 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
                 Cancel
               </button>
               <button type="button" className="btn-primary" onClick={submitSelected}>
+                <UploadIcon />
                 Submit {chosen.length}
               </button>
             </div>
@@ -512,8 +285,8 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
           <>
             <div className="modal__body">
               <p className="modal__text">
-                Delete this document? It disappears from the repository and any request for its approval is withdrawn.
-                It's kept on record.
+                Delete {deleting.filename} and all its versions? It disappears from the repository and any request for
+                its approval is withdrawn. It's kept on record.
               </p>
             </div>
             <div className="modal__footer">
@@ -521,9 +294,12 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
                 Cancel
               </button>
               <button type="button" className="btn-danger" onClick={() => {
-                const ids = deleting;
+                const d = deleting;
                 setDeleting(null);
-                run("delete", () => deleteDocuments(token, docRepo.id, ids), "Deleted");
+                run("delete", async () => {
+                  await deleteDocuments(token, docRepo.id, [d.id]);
+                  return `Deleted ${d.filename}.`;
+                });
               }}>
                 Delete
               </button>
@@ -533,15 +309,4 @@ export function DocumentsTab({ token, docRepo, onSessionEnded, onCountChange }: 
       </Modal>
     </div>
   );
-}
-
-/** A file's kind from its name, for the coloured file icon (doc-name__icon--<kind>). */
-export function extKind(name: string): string {
-  const ext = name.slice(name.lastIndexOf(".") + 1).toLowerCase();
-  if (ext === "pdf") return "pdf";
-  if (ext === "doc" || ext === "docx") return "doc";
-  if (ext === "xls" || ext === "xlsx") return "xls";
-  if (ext === "csv") return "csv";
-  if (ext === "ppt" || ext === "pptx") return "ppt";
-  return "other";
 }

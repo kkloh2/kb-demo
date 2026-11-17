@@ -21,7 +21,7 @@ Decisions happen on the Approvals page (/api/approvals), never here.
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, Path, UploadFile, status
+from fastapi import APIRouter, File, Form, Path, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 
@@ -92,8 +92,8 @@ def outs(db: Db, repo: DocRepo, items: list[versions.View], a: RepoAccess,
     return out
 
 
-def _one(db: Db, user: AppUser, repo_id: uuid.UUID, doc_id: uuid.UUID) -> DocumentOut:
-    repo, view, a = docs.get_view(db, user, repo_id, doc_id)
+def _one(db: Db, user: AppUser, repo_id: uuid.UUID, doc_id: uuid.UUID, published: bool = False) -> DocumentOut:
+    repo, view, a = docs.get_view(db, user, repo_id, doc_id, published)
     return outs(db, repo, [view], a)[0]
 
 
@@ -111,9 +111,12 @@ def _bulk(db: Db, user: AppUser, repo_id: uuid.UUID, result: docs.BulkResult, de
 
 @router.get("/doc-repos/{doc_repo_id}/documents", response_model=list[DocumentOut])
 @readers
-def list_documents(doc_repo_id: DocRepoId, db: Db, p: CurrentUser) -> list[DocumentOut]:
+def list_documents(doc_repo_id: DocRepoId, db: Db, p: CurrentUser,
+                   view: Annotated[str, Query(description="all, published (latest approved versions) or "
+                                                          "in_progress (latest versions not yet approved)")] = "all",
+                   ) -> list[DocumentOut]:
     """Makers and auditors see every status; checkers submitted ones; viewers, owners and admins approved ones."""
-    repo, seen, a = docs.list_documents(db, me(db, p), doc_repo_id)
+    repo, seen, a = docs.list_documents(db, me(db, p), doc_repo_id, view)
     return outs(db, repo, seen, a)
 
 
@@ -146,16 +149,18 @@ async def upload_documents(
 
 @router.get("/doc-repos/{doc_repo_id}/documents/{document_id}", response_model=DocumentOut)
 @readers
-def get_document(doc_repo_id: DocRepoId, document_id: DocumentId, db: Db, p: CurrentUser) -> DocumentOut:
-    return _one(db, me(db, p), doc_repo_id, document_id)
+def get_document(doc_repo_id: DocRepoId, document_id: DocumentId, db: Db, p: CurrentUser,
+                 published: Annotated[bool, Query(description="Its latest approved version")] = False) -> DocumentOut:
+    return _one(db, me(db, p), doc_repo_id, document_id, published)
 
 
 @router.get("/doc-repos/{doc_repo_id}/documents/{document_id}/download", response_class=FileResponse)
 @readers
-def download(doc_repo_id: DocRepoId, document_id: DocumentId, db: Db, p: CurrentUser) -> FileResponse:
+def download(doc_repo_id: DocRepoId, document_id: DocumentId, db: Db, p: CurrentUser,
+             published: Annotated[bool, Query(description="Its latest approved version")] = False) -> FileResponse:
     """The version the person sees (the latest, or for viewers the latest approved one)."""
     user = me(db, p)
-    repo, view, _ = docs.get_view(db, user, doc_repo_id, document_id)
+    repo, view, _ = docs.get_view(db, user, doc_repo_id, document_id, published)
     return _file(db, user, repo, view.doc, view, view.version)
 
 

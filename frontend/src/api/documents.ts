@@ -113,9 +113,15 @@ export interface MetadataUpdate {
 const base = (repoId: string) => `/doc-repos/${repoId}`;
 const json = (body: unknown) => JSON.stringify(body);
 
-export const listDocuments = (t: string, repoId: string) => api<DocRepoDocument[]>(t, `${base(repoId)}/documents`);
-export const getDocument = (t: string, repoId: string, id: string) =>
-  api<DocRepoDocument>(t, `${base(repoId)}/documents/${id}`);
+/** "published": each document's latest approved version; "in_progress": latest versions not yet
+ * approved; "all": each document as the person sees it. */
+export type DocumentsView = "all" | "published" | "in_progress";
+
+export const listDocuments = (t: string, repoId: string, view: DocumentsView = "all") =>
+  api<DocRepoDocument[]>(t, `${base(repoId)}/documents?view=${view}`);
+/** `published`: its latest approved version rather than its latest. */
+export const getDocument = (t: string, repoId: string, id: string, published = false) =>
+  api<DocRepoDocument>(t, `${base(repoId)}/documents/${id}${published ? "?published=true" : ""}`);
 export const documentHistory = (t: string, repoId: string, id: string) =>
   api<RequestHistory[]>(t, `${base(repoId)}/documents/${id}/history`);
 export const listVersions = (t: string, repoId: string, id: string) =>
@@ -160,8 +166,9 @@ export async function downloadPath(t: string, path: string, filename: string): P
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export const downloadDocument = (t: string, doc: DocRepoDocument) =>
-  downloadPath(t, `${base(doc.doc_repo_id)}/documents/${doc.id}/download`, doc.filename);
+/** The version shown: `doc` as listed (a Published list's document downloads its approved version). */
+export const downloadDocument = (t: string, doc: DocRepoDocument, published = false) =>
+  downloadPath(t, `${base(doc.doc_repo_id)}/documents/${doc.id}/download${published ? "?published=true" : ""}`, doc.filename);
 export const downloadVersion = (t: string, doc: DocRepoDocument, v: DocumentVersion) =>
   downloadPath(t, `${base(doc.doc_repo_id)}/documents/${doc.id}/versions/${v.number}/download`, v.filename);
 
